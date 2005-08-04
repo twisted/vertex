@@ -74,8 +74,14 @@ class GinPacket(object):
 
 class GinConnection(tcpdfa.TCP):
     """
-    @ivar peerSequence: The peer's current sequence number
-    @ivar hostSequence: Our current sequence number
+    @ivar selfSequence: An index into our outgoing stream: the value
+    which will be included in the next new outgoing packet as the
+    sequence number.
+
+    @ivar selfAcknowledged: An index into the peer's outgoing stream:
+    the highest sequence number we have actually acknowledged; also,
+    the highest sequence number associated with a packet we have
+    delivered to our protocol.
     """
 
     def __init__(self, connID, gin, factory):
@@ -100,9 +106,29 @@ class GinConnection(tcpdfa.TCP):
         elif packet.rst:
             self.input(tcpdfa.RST, packet)
 
+        if packet.data:
+            self._maybeDeliver(packet.seq, packet.data)
+
+    def write(self, bytes):
+        self.gin.sendPacket(self.originate(data=bytes))
+
+    def _maybeDeliver(self, seq, data):
+        if packet.seq >= self.selfAcknowledged:
+            self._pending.append((seq, data))
+            self._pending.sort(key=lambda seq, data: -seq)
+            count = 0
+            while self._pending and self._pending[-1][0] == self.selfAcknowledged:
+                data = self._pending.pop()[1]
+                count += len(data)
+                self.protocol.dataReceived(data)
+            self.selfAcknowledged += count
+            self.gin.sendPacket(self.originate(ack=True))
+
     def originate(self, data='', syn=False, ack=False, fin=False):
-        return GinPacket.originate(self.connID, self.hostSequence,
-                                   self.peerSequence, data, syn, ack, fin)
+        p = GinPacket.originate(self.connID, self.selfSequence,
+                                   self.selfAcknowledged, data, syn, ack, fin)
+        self.selfSequence += len(data)
+        return p
 
     def stopListening(self):
         del self.gin._connections[self.connID]
@@ -214,6 +240,14 @@ class GinConnection(tcpdfa.TCP):
         """
         self.peerAcknowledgment = packet.ackNum
 
+        self.outOfOrder.append((packet.seq, packet.data))
+        self.outOfOrder.sort()
+
+        if self.outOfOrder[0][0] == self.
+
+
+        self.protocol.dataReceived(packet.data)
+
     def transition_ESTABLISHED_to_BROKEN(self):
         """
         Crud.  Something timed out.  We're going away now.
@@ -250,13 +284,61 @@ class GinConnection(tcpdfa.TCP):
         the connection uncleanly.
         """
         self.protocol.connectionLost(error.TimeoutError())
-        self.protocol = protocol
+        self.protocol = None
 
     def transition_FIN_WAIT_1_to_FIN_WAIT_2(self, packet):
         """
-        They ack'd out fin.  That's part one of the teardown.
+        They ack'd our fin.  That's part one of the teardown.  Now
+        we're just waiting for their fin.
         """
-        
+
+    def transition_FIN_WAIT_1_to_CLOSING(self, packet):
+        """
+        A fin!  Simultaneous TCP close!  Woop.  Spit out an ack.
+        """
+        self.gin.sendPacket(self.originate(ack=True, fin=True))
+
+    def transition_FIN_WAIT_1_to_TIME_WAIT(self, packet):
+        self.gin.sendPacket(self.originate(ack=True))
+
+    def transition_FIN_WAIT_1_to_BROKEN(self):
+        """
+        We got tired of waiting for their ACK or their FIN+ACK.
+        """
+        self.protocol.connectionLost(error.TimeoutError())
+        self.protocol = None
+
+    def transition_FIN_WAIT_2_to_BROKEN(self):
+        """
+        We got tired of waiting for their FIN.
+        """
+        self.protocol.connectionLost(error.TimeoutError())
+        self.protocol = None
+
+    def transition_FIN_WAIT_2_to_TIME_WAIT(self, packet):
+        """
+        They sent us their fin.  Ack it.
+        """
+        self.gin.sendPacket(self.originate(ack=True, fin=True))
+        self.protocol.connectionLost(error.ConnectionDone())
+        self.protocol = None
+
+    def transition_CLOSING_to_BROKEN(self):
+        """
+        TOO SLOW!!!!!!!!!!!!!!!!!!! DIE PROTOCOL DIE
+        """
+        self.protocol.connectionLost(error.TimeoutError())
+        self.protocol = None
+
+    def transition_CLOSING_to_TIME_WAIT(self, packet):
+        """
+        They ack'd.  Great.  Do nothing.
+        """
+
+    def transition_TIME_WAIT_to_CLOSED(self):
+        """
+        Okay the connection is totally gone for good.
+        """
 
 class GinAddress(object):
     # garbage
