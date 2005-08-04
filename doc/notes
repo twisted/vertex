@@ -10,6 +10,7 @@ Packet Format
 Connection ID - 32 bits
 Sequence Number - 32 bits
 Ack number - 32 bits
+Window - 32 bits
 Flags (SYN, ACK, FIN, IGN) - 8 bits
 Checksum - 32 bits
 Data length in bytes - 16 bits
@@ -29,3 +30,29 @@ ACK+NAT: Response with information about the recipient's public address.  The
 data is the IP address and port number to which the packet is being sent,
 formatted as a dotted-quad formatted IP address followed by a colon followed by
 the base-10 string representation of the port number..
+
+Other Stuff:
+
+Connection IDs uniquely identify a stream for a protocol.  All bytes
+associated with a particular connectionID will be delivered to the
+same protocol instance.
+
+Sequence Numbers indicate the senders notion of how far into its
+outgoing stream this packet is.  Sequence numbers start from a
+pseudo-random value within the allowed range and are incremented by
+the number of bytes in each packet transmitted (re-transmits
+discounted).  This indicates to the peer where the bytes in each
+packet lie in the stream, allowing ordered delivery.
+
+Ack numbers indicate the senders notion of how far into its incoming
+stream all data has been received.  This value is always what the
+sender expects the receiver to use as its next sequence number.
+
+Window indicates the number of bytes in advance of the senders ack
+number the receiver may proceed in sending.  This receiver's sequence
+numbers must never be greater than the sender's last ack number plus
+their window number.
+
+Checksum is a CRC 32 of the data (and only the data - wait maybe this
+should be the header less the checksum, too, in case things get
+corrupted there)
