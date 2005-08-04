@@ -1,0 +1,31 @@
+
+Gin
+===
+
+TCP-alike over UDP
+
+Packet Format
+=============
+
+Connection ID - 32 bits
+Sequence Number - 32 bits
+Ack number - 32 bits
+Flags (SYN, ACK, FIN, IGN) - 8 bits
+Checksum - 32 bits
+Data length in bytes - 16 bits
+Data - See previous
+
+SEMANTICS
+=========
+Different types of packets:
+
+just SYN:
+SYN+ACK:
+just ACK: normal tcp packet meanings
+
+SYN+NAT: Request for information about the sender's public address
+
+ACK+NAT: Response with information about the recipient's public address.  The
+data is the IP address and port number to which the packet is being sent,
+formatted as a dotted-quad formatted IP address followed by a colon followed by
+the base-10 string representation of the port number..
