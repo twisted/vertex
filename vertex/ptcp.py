@@ -22,6 +22,14 @@ def _flagprop(flag):
             self.flags &= ~flag
     return property(lambda self: self.flags & flag, setter)
 
+def iterchunks(data, mtu, window):
+    """iterate chunks of data
+    """
+    offt = 0
+    while offt < len(data) and offt < window:
+        yield data[offt:min(offt + mtu, window)]
+        offt += mtu
+
 class PtcpPacket(util.FancyStrMixin, object):
     showAttributes = (
         ('connID', 'connID', '%d'),
@@ -107,6 +115,8 @@ class PtcpConnection(tcpdfa.TCP):
     """
 
     mtu = 16384
+    hostWindow = mtu
+    peerWindow = mtu
 
     protocol = None
 
@@ -123,6 +133,11 @@ class PtcpConnection(tcpdfa.TCP):
 
     def packetReceived(self, packet):
         # print 'packet received', packet
+        if packet.stb:
+            [self.mtu] = struct.unpack('!H', packet.data)
+            # print 'I CHANGED THE MTU TO', self.mtu
+            self._writeLater()
+            return
         if packet.syn:
             self.selfAcknowledged = packet.seqNum
             if packet.ack:
@@ -138,11 +153,10 @@ class PtcpConnection(tcpdfa.TCP):
             self.input(tcpdfa.ACK, packet)
         elif packet.rst:
             self.input(tcpdfa.RST, packet)
-        elif packet.stb:
-            [self.mtu] = struct.unpack('!H', packet.data)
-            # print 'I CHANGED THE MTU TO', self.mtu
-            self._writeLater()
-            return
+
+        if packet.window != self.hostWindow:
+            print 'Adjusting window size to', packet.window
+            self.hostWindow = packet.window
 
         acknowledgedByteCount = packet.ackNum - self.selfSequence
         if acknowledgedByteCount > 0:
@@ -170,7 +184,25 @@ class PtcpConnection(tcpdfa.TCP):
 
     def _reallyWrite(self):
         self._nagle = None
+#         for chunk in iterchunks(self._outgoingBytes, self.mtu, self.hostWindow):
+#             # print 'Writing', repr(chunk)
+#             self.ptcp.sendPacket(self.originate(data=chunk))
         self.ptcp.sendPacket(self.originate(data=self._outgoingBytes[:self.mtu]))
+        self._retransmitLater()
+
+    _retransmitter = None
+    _retransmitTimeout = 0.5
+
+    def _retransmitLater(self):
+        if self._retransmitter is None:
+            print 'Setting up retransmitter', self._retransmitTimeout
+            self._retransmitter = reactor.callLater(self._retransmitTimeout, self._reallyRetransmit)
+
+    def _reallyRetransmit(self):
+        print 'Hooray'
+        self._retransmitTimeout = None
+        self._writeLater()
+
 
     disconnecting = False       # This is *TWISTED* level state-machine stuff,
                                 # not TCP-level.
@@ -238,10 +270,11 @@ class PtcpConnection(tcpdfa.TCP):
 
     def originate(self, data='', syn=False, ack=False, fin=False):
         p = PtcpPacket.create(self.connID,
-                                self.selfSequence,
-                                self.selfAcknowledged, data,
-                                syn=syn, ack=ack, fin=fin,
-                                destination=self.peerAddressTuple)
+                              self.selfSequence,
+                              self.selfAcknowledged, data,
+                              window=self.peerWindow,
+                              syn=syn, ack=ack, fin=fin,
+                              destination=self.peerAddressTuple)
         s = (syn and 'syn' or '') + (ack and 'ack' or '') + (fin and 'fin' or '')
 #         if s:
 #             print s
@@ -259,7 +292,11 @@ class PtcpConnection(tcpdfa.TCP):
         self.factory.clientConnectionFailed(error.TimeoutError())
 
     def enter_CLOSED(self, packet=None):
+        print 'I CLOSED'
         del self.ptcp._connections[self.connID]
+        for dcall in self._nagle, self._retransmitter:
+            if dcall is not None:
+                dcall.cancel()
 
     peerAddressTuple = None
 
@@ -346,6 +383,7 @@ class Ptcp(protocol.DatagramProtocol):
         return connID
 
     def sendPacket(self, packet):
+        # print 'Sending', packet, 'to', packet.destination
         self.transport.write(packet.encode(), packet.destination)
 
 
@@ -380,6 +418,7 @@ class Ptcp(protocol.DatagramProtocol):
             print repr(pkt.data)
             print hex(pkt.checksum), hex(pkt.computeChecksum())
         else:
+            # print 'Receiving a packet', pkt
             self.packetReceived(pkt)
 
     def packetReceived(self, packet):

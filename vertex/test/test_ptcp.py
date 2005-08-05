@@ -1,4 +1,6 @@
 
+import random
+
 from twisted.internet import reactor, protocol, defer
 from twisted.trial import unittest
 
@@ -37,8 +39,8 @@ class TestProtocol(protocol.Protocol):
                 self._waiting = None
 
 class TestProducerProtocol(protocol.Protocol):
-    NUM_WRITES = 3
-    WRITE_SIZE = 2
+    NUM_WRITES = 32
+    WRITE_SIZE = 32
 
     def connectionMade(self):
         self.count = -1
@@ -55,7 +57,6 @@ class TestProducerProtocol(protocol.Protocol):
                 self.transport.loseConnection()
         else:
             self.transport.unregisterProducer()
-
 
 class PtcpTransportTestCase(unittest.TestCase):
     def setUpForATest(self,
@@ -149,4 +150,20 @@ class PtcpTransportTestCase(unittest.TestCase):
         clientConnID = clientTransport.connect(cf, '127.0.0.1', serverPort.getHost().port)
         return clientProto.onDisconn.addCallback(disconnected).addCallback(tearDown)
 
+
+
+def randomLossy(method):
+    def worseMethod(*a, **kw):
+        if random.choice((True, False, False, False)):
+            method(*a, **kw)
+    return worseMethod
+
+class RandomLossyTransportTestCase(PtcpTransportTestCase):
+    def setUpForATest(self, *a, **kw):
+        results = PtcpTransportTestCase.setUpForATest(self, *a, **kw)
+        results[-2].write = randomLossy(results[-2].write)
+        results[-2].writeSequence = randomLossy(results[-2].writeSequence)
+        results[-1].write = randomLossy(results[-1].write)
+        results[-1].writeSequence = randomLossy(results[-1].writeSequence)
+        return results
 
