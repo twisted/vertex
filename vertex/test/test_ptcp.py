@@ -37,9 +37,17 @@ class TestProtocol(protocol.Protocol):
 
 class PtcpTransportTestCase(unittest.TestCase):
     def testVerySimpleConnection(self):
-        print
-        serverTransport = ptcp.Ptcp()
-        clientTransport = ptcp.Ptcp()
+
+        serverProto = TestProtocol()
+        clientProto = TestProtocol()
+        sf = protocol.ServerFactory()
+        sf.protocol = lambda: serverProto
+
+        cf = protocol.ClientFactory()
+        cf.protocol = lambda: clientProto
+
+        serverTransport = ptcp.Ptcp(sf)
+        clientTransport = ptcp.Ptcp(None)
         serverPort = reactor.listenUDP(0, serverTransport)
         clientPort = reactor.listenUDP(0, clientTransport)
 
@@ -50,16 +58,7 @@ class PtcpTransportTestCase(unittest.TestCase):
                     clientPort.stopListening()
                     ])
 
-        serverProto = TestProtocol()
-        clientProto = TestProtocol()
-        sf = protocol.ServerFactory()
-        sf.protocol = lambda: serverProto
-
-        cf = protocol.ClientFactory()
-        cf.protocol = lambda: clientProto
-
-        serverConnID = serverTransport.listen(sf)
-        clientConnID = clientTransport.connect(cf, '127.0.0.1', serverPort.getHost().port, serverConnID)
+        clientConnID = clientTransport.connect(cf, '127.0.0.1', serverPort.getHost().port)
 
         def sendSomeBytes(ignored, n=10, server=False):
             if n:

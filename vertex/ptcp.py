@@ -106,7 +106,7 @@ class PtcpConnection(tcpdfa.TCP):
 
     protocol = None
 
-    def __init__(self, connID, ptcp, factory):
+    def __init__(self, connID, ptcp, factory, peerAddressTuple):
         tcpdfa.TCP.__init__(self)
         self.connID = connID
         self.ptcp = ptcp
@@ -114,6 +114,7 @@ class PtcpConnection(tcpdfa.TCP):
         self._pending = []
         self._writeBufferEmptyCallbacks = []
         self.selfAcknowledged = 0
+        self.peerAddressTuple = peerAddressTuple
 
 
     def packetReceived(self, packet):
@@ -303,20 +304,17 @@ class PtcpAddress(object):
 
 class Ptcp(protocol.DatagramProtocol):
     # External API
-    def listen(self, factory):
+
+    def __init__(self, factory):
+        self.factory = factory
+
+    def connect(self, factory, host, port):
         self._lastConnID += 5 # random.randrange(2 ** 32)
         self._lastConnID %= 2 ** (struct.calcsize('L') * 8)
-        conn = self._connections[self._lastConnID] = PtcpConnection(
-            self._lastConnID, self, factory)
-        conn.input(tcpdfa.APP_PASSIVE_OPEN)
-        return self._lastConnID
-
-
-    def connect(self, factory, host, port, connID):
-        assert connID not in self._connections
-        conn = self._connections[connID] = PtcpConnection(
-            connID, self, factory)
-        conn.peerAddressTuple = (host, port)
+        connID = self._lastConnID
+        conn = self._connections[(connID, (host, port))
+                                 ] = PtcpConnection(
+            connID, self, factory, (host, port))
         conn.input(tcpdfa.APP_ACTIVE_OPEN)
         return connID
 
@@ -369,8 +367,11 @@ class Ptcp(protocol.DatagramProtocol):
                 # Uh, what?
                 pass
         else:
-            if packet.connID in self._connections:
-                self._connections[packet.connID].packetReceived(packet)
-            else:
-                # Errrrr
-                pass
+            packey = (packet.connID, packet.peerAddressTuple)
+            if packey not in self._connections:
+                conn = PtcpConnection(packet.connID, self,
+                                      self.factory, packet.peerAddressTuple)
+                conn.input(tcpdfa.APP_PASSIVE_OPEN)
+                self._connections[packey] = conn
+            self._connections[packey].packetReceived(packet)
+
