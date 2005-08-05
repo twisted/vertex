@@ -1,15 +1,18 @@
 # -*- test-case-name: vertex.test.test_gin -*-
 
 import struct, zlib
+import random
 
-from twisted.internet import protocol
+from twisted.internet import protocol, error, reactor
+from twisted.python import log, util
 
 from vertex import tcpdfa
+from vertex.statemachine import StateError
 
-_packetFormat = '!4LBLH'
+_packetFormat = '!4LBlH'
 _fixedSize = struct.calcsize(_packetFormat)
 
-_SYN, _ACK, _FIN, _RST, _NAT = [1 << n for n in range(5)]
+_SYN, _ACK, _FIN, _RST, _NAT, _STB = [1 << n for n in range(6)]
 
 def _flagprop(flag):
     def setter(self, value):
@@ -19,25 +22,40 @@ def _flagprop(flag):
             self.flags &= ~flag
     return property(lambda self: self.flags & flag, setter)
 
-class GinPacket(object):
+class GinPacket(util.FancyStrMixin, object):
+    showAttributes = (
+        ('connID', 'connID', '%d'),
+        ('data', 'data', '%r'),
+        ('flags', 'flags', '%x'),
+        ('dlen', 'dlen', '%d'),
+        ('checksum', 'checksum', '%x'),
+        ('peerAddressTuple', 'peerAddress', '%r'),
+        )
+
     syn = _flagprop(_SYN)
     ack = _flagprop(_ACK)
     fin = _flagprop(_FIN)
     rst = _flagprop(_RST)
     nat = _flagprop(_NAT)
+    stb = _flagprop(_STB)
 
-    def originate(cls, connID, seqNum, ackNum, data,
-                  window=1 << 15,
+    def create(cls, connID, seqNum, ackNum, data,
+                  window=(1 << 15),
                   syn=False, ack=False, fin=False,
-                  rst=False, nat=False):
-        i = cls(connID, seqNum, seqNum, ackNum,
+                  rst=False, nat=False, stb=False,
+                  destination=None):
+        i = cls(connID, seqNum, ackNum, window,
                 0, zlib.crc32(data), len(data), data)
         i.syn = syn
         i.ack = ack
         i.fin = fin
         i.nat = nat
         i.rst = rst
+        i.stb = stb
+        i.destination = destination
         return i
+    create = classmethod(create)
+
 
     def __init__(self, connID, seqNum, ackNum, window, flags,
                  checksum, dlen, data, peerAddressTuple=None):
@@ -51,13 +69,13 @@ class GinPacket(object):
         self.data = data
         self.peerAddressTuple = peerAddressTuple # None if local
 
-    def verify(self):
-        return (
-            len(self.data) == self.dlen and
-            zlib.crc32(self.data) == self.checksum)
+
+    def verifyChecksum(self):
+        return len(self.data) == self.dlen and self.checksum == zlib.crc32(self.data)
+
 
     def decode(cls, bytes, hostPortPair):
-        fields = struct.unpack(_packetFormat, bytes)
+        fields = struct.unpack(_packetFormat, bytes[:_fixedSize])
         connID, seq, ack, window, flags, checksum, dlen = fields
         data = bytes[_fixedSize:]
         return cls(connID, seq, ack, window, flags,
@@ -69,7 +87,7 @@ class GinPacket(object):
         checksum = zlib.crc32(self.data)
         return struct.pack(
             _packetFormat,
-            self.connID, self.seq, self.ack, self.window,
+            self.connID, self.seqNum, self.ackNum, self.window,
             self.flags, checksum, dlen) + self.data
 
 class GinConnection(tcpdfa.TCP):
@@ -84,14 +102,24 @@ class GinConnection(tcpdfa.TCP):
     delivered to our protocol.
     """
 
+    mtu = 16384
+
+    protocol = None
+
     def __init__(self, connID, gin, factory):
         tcpdfa.TCP.__init__(self)
         self.connID = connID
         self.gin = gin
         self.factory = factory
+        self._pending = []
+        self._writeBufferEmptyCallbacks = []
+        self.selfAcknowledged = 0
+
 
     def packetReceived(self, packet):
+        # print 'packet received', packet
         if packet.syn:
+            self.selfAcknowledged = packet.seqNum
             if packet.ack:
                 self.input(tcpdfa.SYN_ACK, packet)
             else:
@@ -105,78 +133,116 @@ class GinConnection(tcpdfa.TCP):
             self.input(tcpdfa.ACK, packet)
         elif packet.rst:
             self.input(tcpdfa.RST, packet)
+        elif packet.stb:
+            [self.mtu] = struct.unpack('!H', packet.data)
+            print 'I CHANGED THE MTU TO', self.mtu
+            self._writeLater()
+            return
 
+        acknowledgedByteCount = packet.ackNum - self.selfSequence
+        if acknowledgedByteCount > 0:
+            self._outgoingBytes = self._outgoingBytes[acknowledgedByteCount:]
+            self.selfSequence = packet.ackNum
+            if self._outgoingBytes:
+                self._writeLater()
+            else:
+                self._notifyWriteBufferEmpty()
         if packet.data:
-            self._maybeDeliver(packet.seq, packet.data)
+            self._maybeDeliver(packet.seqNum, packet.data)
 
+    _outgoingBytes = ''
+    _nagle = None
     def write(self, bytes):
-        self.gin.sendPacket(self.originate(data=bytes))
+        self._outgoingBytes += bytes
+        self._writeLater()
+
+    def writeSequence(self, seq):
+        self.write(''.join(seq))
+
+    def _writeLater(self):
+        if self._nagle is None:
+            self._nagle = reactor.callLater(0, self._reallyWrite)
+
+    def _reallyWrite(self):
+        self._nagle = None
+        self.gin.sendPacket(self.originate(data=self._outgoingBytes[:self.mtu]))
+
+    disconnecting = False       # This is *TWISTED* level state-machine stuff,
+                                # not TCP-level.
+
+    def loseConnection(self):
+        self.disconnecting = True
+        self._whenWriteBufferEmpty(self.input, tcpdfa.APP_CLOSE)
+
+    def _whenWriteBufferEmpty(self, f, *a, **kw):
+        if not self._outgoingBytes:
+            f(*a, **kw)
+        else:
+            self._writeBufferEmptyCallbacks.append((f, a, kw))
+
+    def _notifyWriteBufferEmpty(self):
+        wbec = self._writeBufferEmptyCallbacks
+        if wbec:
+            self._writeBufferEmptyCallbacks = []
+            for f, a, k in wbec:
+                f(*a, **k)
+
+    protocolDied = False
 
     def _maybeDeliver(self, seq, data):
-        if packet.seq >= self.selfAcknowledged:
+        if seq >= self.selfAcknowledged:
             self._pending.append((seq, data))
-            self._pending.sort(key=lambda seq, data: -seq)
+            self._pending.sort(key=lambda (seq, data): -seq)
             count = 0
             while self._pending and self._pending[-1][0] == self.selfAcknowledged:
                 data = self._pending.pop()[1]
                 count += len(data)
-                self.protocol.dataReceived(data)
+                if self.protocol is not None:
+                    try:
+                        self.protocol.dataReceived(data)
+                    except:
+                        log.err()
+                        self.input(tcpdfa.APP_CLOSE)
+                        return
             self.selfAcknowledged += count
-            self.gin.sendPacket(self.originate(ack=True))
+            print 'Acking due to delivered packets'
+            self._writeLater()
 
     def originate(self, data='', syn=False, ack=False, fin=False):
-        p = GinPacket.originate(self.connID, self.selfSequence,
-                                   self.selfAcknowledged, data, syn, ack, fin)
-        self.selfSequence += len(data)
+        p = GinPacket.create(self.connID,
+                                self.selfSequence,
+                                self.selfAcknowledged, data,
+                                syn=syn, ack=ack, fin=fin,
+                                destination=self.peerAddressTuple)
+        s = (syn and 'syn' or '') + (ack and 'ack' or '') + (fin and 'fin' or '')
+        if s:
+            print s
         return p
 
     def stopListening(self):
         del self.gin._connections[self.connID]
 
     # State machine transition definitions, hooray.
-    def transition_CLOSED_to_LISTEN(self):
-        """
-        Starting up as a server.  Nothing actually needs to be done
-        here.
-        """
 
-    def transition_CLOSED_to_SYN_SENT(self):
-        """
-        Starting up as a client.  Bounce some traffic off the server.
-        """
-        self.peerSequence = 0
-        self.hostSequence = random.randrange(2 ** 31)
-        self.gin.sendPacket(self.originate(syn=True))
-
-    def transition_SYN_SENT_to_CLOSED(self):
+    def transition_SYN_SENT_to_CLOSED(self, packet=None):
         """
         The connection never got anywhere.  Goodbye.
         """
+        self.factory.clientConnectionFailed(error.TimeoutError())
+
+    def enter_CLOSED(self, packet=None):
         del self.gin._connections[self.connID]
-        self.factory.clientConnectionFailed(error.Timeout())
 
-    def transition_SYN_SENT_to_ESTABLISHED(self, packet):
-        """
-        The peer ACK'd our SYN.  Phase Two complete!
-        """
-        self.peerSequence = packet.seq
-        self.gin.sendPacket(self.originate(ack=True))
+    peerAddressTuple = None
 
-    def transition_SYN_SENT_to_SYN_RCVD(self, packet):
-        """
-        Simultaneous TCP connect.  I don't think this applies to Gin.
-        """
-        raise RuntimeError("exarkun is wrong!")
-        self.peerSequence = packet.seq
-        self.gin.sendPacket(self.originate(syn=True, ack=True))
-
-    def transition_LISTEN_to_SYN_RCVD(self, packet):
-        """
-        A passive connection succeeded (we were listening, they sent
-        us a SYN).  Do the second part of the handshake.
-        """
-        self.peerSequence = packet.seq
-        self.gin.sendPacket(self.originate(syn=True, ack=True))
+    def enter_SYN_RCVD(self, packet):
+        self.selfAcknowledged = packet.seqNum
+        if self.peerAddressTuple is None:
+            # we're a server
+            self.peerAddressTuple = packet.peerAddressTuple
+        else:
+            # we're a client
+            assert self.peerAddressTuple == packet.peerAddressTuple
 
     def transition_LISTEN_to_SYN_SENT(self, packet):
         """
@@ -185,7 +251,7 @@ class GinConnection(tcpdfa.TCP):
         """
         raise StateError("You can't write anything until someone connects to you.")
 
-    def transition_SYN_RCVD_to_ESTABLISHED(self, packet):
+    def enter_ESTABLISHED(self, packet):
         """
         We sent out SYN, they acknowledged it.  Congratulations, you
         have a new baby connection.
@@ -201,144 +267,30 @@ class GinConnection(tcpdfa.TCP):
         else:
             self.protocol = p
 
-    def transition_SYN_RCVD_to_FIN_WAIT_1(self):
-        """
-        I think this is an impossible state for Gin.
-        """
-        raise RuntimeError("exarkun is stupid.")
-        self.gin.sendPacket(self.originate(fin=True))
-
-    def transition_SYN_RCVD_to_CLOSED(self):
-        """
-        A timeout expired.  Oh well, sucks to this connection.
-        """
-        self.gin.sendPacket(self.originate(rst=True))
-
-    def transition_SYN_RCVD_to_LISTEN(self, packet):
-        """
-        A peer's timeout expired.  They told us they weren't going to
-        bother finishing the connection.  Go back to listening (ie, do
-        nothing).
-        """
-
-    def transition_ESTABLISHED_to_FIN_WAIT_1(self):
-        """
-        The application asked us to close.  So we're closing.  There's
-        no packet associated with this transition.
-        """
-        self.gin.sendPacket(self.originate(fin=True))
-
-    def transition_ESTABLISHED_to_CLOSE_WAIT(self, packet):
-        """
-        The remote end told us to shut down the connection.  Goodbye.
-        """
-        self.gin.sendPacket(self.originate(fin=True, ack=True))
-
-    def transition_ESTABLISHED_to_ESTABLISHED(self, packet):
-        """
-        We received an ACK.  Take note.
-        """
-        self.peerAcknowledgment = packet.ackNum
-
-        self.outOfOrder.append((packet.seq, packet.data))
-        self.outOfOrder.sort()
-
-        if self.outOfOrder[0][0] == self.
-
-
-        self.protocol.dataReceived(packet.data)
-
-    def transition_ESTABLISHED_to_BROKEN(self):
-        """
-        Crud.  Something timed out.  We're going away now.
-        """
-        self.protocol.connectionLost(error.TimeoutError())
+    def exit_ESTABLISHED(self, packet=None):
+        print 'LEAVING ESTABLISHED AND CLOSING THE CONNECTION'
+        try:
+            self.protocol.connectionLost(error.ConnectionLost())
+        except:
+            log.err()
         self.protocol = None
 
-    def transition_CLOSE_WAIT_to_LAST_ACK(self):
-        """
-        We were going to close and the application told us to really,
-        really do it.  Really.
-        """
-        self.gin.sendPacket(self.originate(fin=True))
-
-    def transition_CLOSE_WAIT_to_BROKEN(self):
-        """
-        We tried to close cleanly.  Really, we did.  The peer did not
-        cooperate, so we time out the connection.
-        """
-        self.protocol.connectionLost(error.TimeoutError())
-        self.protocol = None
-
-    def transition_LAST_ACK_to_NOTHING(self, packet):
-        """
-        We were waiting for them to ack our last packet.  They did.
-        The connection is going away nice and clean now.
-        """
-        self.protocol.connectionLost(error.ConnectionDone())
-        self.protocol = None
-
-    def transition_LAST_ACK_to_BROKEN(self):
-        """
-        They didn't ack our last packet.  How disappointing.  Time out
-        the connection uncleanly.
-        """
-        self.protocol.connectionLost(error.TimeoutError())
-        self.protocol = None
-
-    def transition_FIN_WAIT_1_to_FIN_WAIT_2(self, packet):
-        """
-        They ack'd our fin.  That's part one of the teardown.  Now
-        we're just waiting for their fin.
-        """
-
-    def transition_FIN_WAIT_1_to_CLOSING(self, packet):
-        """
-        A fin!  Simultaneous TCP close!  Woop.  Spit out an ack.
-        """
+    def output_FIN_ACK(self, packet=None):
         self.gin.sendPacket(self.originate(ack=True, fin=True))
 
-    def transition_FIN_WAIT_1_to_TIME_WAIT(self, packet):
+    def output_ACK(self, packet=None):
         self.gin.sendPacket(self.originate(ack=True))
 
-    def transition_FIN_WAIT_1_to_BROKEN(self):
-        """
-        We got tired of waiting for their ACK or their FIN+ACK.
-        """
-        self.protocol.connectionLost(error.TimeoutError())
-        self.protocol = None
+    def output_FIN(self, packet=None):
+        self.gin.sendPacket(self.originate(fin=True))
 
-    def transition_FIN_WAIT_2_to_BROKEN(self):
-        """
-        We got tired of waiting for their FIN.
-        """
-        self.protocol.connectionLost(error.TimeoutError())
-        self.protocol = None
+    def output_SYN_ACK(self, packet=None):
+        self.selfSequence = 200
+        self.gin.sendPacket(self.originate(syn=True, ack=True))
 
-    def transition_FIN_WAIT_2_to_TIME_WAIT(self, packet):
-        """
-        They sent us their fin.  Ack it.
-        """
-        self.gin.sendPacket(self.originate(ack=True, fin=True))
-        self.protocol.connectionLost(error.ConnectionDone())
-        self.protocol = None
-
-    def transition_CLOSING_to_BROKEN(self):
-        """
-        TOO SLOW!!!!!!!!!!!!!!!!!!! DIE PROTOCOL DIE
-        """
-        self.protocol.connectionLost(error.TimeoutError())
-        self.protocol = None
-
-    def transition_CLOSING_to_TIME_WAIT(self, packet):
-        """
-        They ack'd.  Great.  Do nothing.
-        """
-
-    def transition_TIME_WAIT_to_CLOSED(self):
-        """
-        Okay the connection is totally gone for good.
-        """
+    def output_SYN(self, packet=None):
+        self.selfSequence = 100
+        self.gin.sendPacket(self.originate(syn=True))
 
 class GinAddress(object):
     # garbage
@@ -348,23 +300,33 @@ class GinAddress(object):
         self.port = port
         self.connid = connid
 
+
 class Gin(protocol.DatagramProtocol):
     # External API
     def listen(self, factory):
-        self._connID += 827
-        self._connID %= 2 ** (struct.calcsize('L') * 8)
-        conn = self._connections[self._connID] = GinConnection(
-            self._connID, self, factory)
+        self._lastConnID += 5 # random.randrange(2 ** 32)
+        self._lastConnID %= 2 ** (struct.calcsize('L') * 8)
+        conn = self._connections[self._lastConnID] = GinConnection(
+            self._lastConnID, self, factory)
         conn.input(tcpdfa.APP_PASSIVE_OPEN)
-        return self._connID
+        return self._lastConnID
 
+
+    def connect(self, factory, host, port, connID):
+        assert connID not in self._connections
+        conn = self._connections[connID] = GinConnection(
+            connID, self, factory)
+        conn.peerAddressTuple = (host, port)
+        conn.input(tcpdfa.APP_ACTIVE_OPEN)
+        return connID
 
     def sendPacket(self, packet):
-        self.transport.write(packet.encode())
+        self.transport.write(packet.encode(), packet.destination)
 
 
     # Internal stuff
     def startProtocol(self):
+        self._lastConnID = 10 # random.randrange(2 ** 32)
         self._connections = {}
 
     def stopProtocol(self):
@@ -377,11 +339,23 @@ class Gin(protocol.DatagramProtocol):
             return
 
         pkt = GinPacket.decode(bytes, addr)
-        if not pkt.verify():
-            # Booo.
-            return
 
-        self.packetReceived(pkt)
+        if pkt.dlen > len(pkt.data):
+            self.sendPacket(
+                GinPacket.create(
+                    pkt.connID,
+                    0,
+                    0,
+                    struct.pack('!H', len(pkt.data)),
+                    stb=True,
+                    destination=addr))
+        elif not pkt.verifyChecksum():
+            print "bad packet", pkt
+            print pkt.dlen, len(pkt.data)
+            print repr(pkt.data)
+            print hex(pkt.checksum), hex(zlib.crc32(pkt.data))
+        else:
+            self.packetReceived(pkt)
 
     def packetReceived(self, packet):
         if packet.nat:
@@ -400,5 +374,3 @@ class Gin(protocol.DatagramProtocol):
             else:
                 # Errrrr
                 pass
-
-

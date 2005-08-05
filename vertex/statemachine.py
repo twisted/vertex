@@ -2,6 +2,10 @@
 
 NOTHING = 'nothing'             # be quiet (no output)
 
+class StateError(Exception):
+    """
+    """
+
 class StateMachine:
 
     initialState = None         # a str describing initial state
@@ -16,10 +20,13 @@ class StateMachine:
         self.state = self.initialState
 
     def transition(self, oldstate, newstate, datum, *a, **kw):
+        if oldstate == newstate:
+            return
+        print hex(id(self)), 'Going from', oldstate, 'to', newstate, 'because', datum
         exitmeth = getattr(self, 'exit_%s' % (oldstate,), None)
         entermeth = getattr(self, 'enter_%s' % (newstate,), None)
         transmeth = getattr(self, 'transition_%s_to_%s' % (
-                oldstate.upper(), newstate.upper()), None)
+                oldstate, newstate), None)
         for meth in exitmeth, entermeth, transmeth:
             if meth is not None:
                 meth(*a, **kw)
@@ -29,14 +36,21 @@ class StateMachine:
         oldstate = self.state
         if datum == NOTHING:
             return
-        output, newstate = self.states[self.state][datum]
-        OLDSTATE = self.state
-        NEWSTATE = newstate.upper()
-        DATUM = datum.upper()
-        self.transition(OLDSTATE, NEWSTATE, DATUM, *a, **kw)
-        self.output(output, *a, **kw)
+        try:
+            output, newstate = self.states[self.state][datum]
+        except KeyError:
+            self.invalidInput(datum)
+        else:
+            OLDSTATE = self.state.upper()
+            NEWSTATE = newstate.upper()
+            DATUM = datum.upper()
+            self.transition(OLDSTATE, NEWSTATE, DATUM, *a, **kw)
+            self.output(output, *a, **kw)
 
     def output(self, datum, *a, **kw):
         foo = getattr(self, 'output_' + datum.upper(), None)
         if foo is not None:
             foo(*a, **kw)
+
+    def invalidInput(self, datum):
+        raise StateError("Invalid input in %r: %r" % (self.state, datum))

@@ -31,6 +31,9 @@ data is the IP address and port number to which the packet is being sent,
 formatted as a dotted-quad formatted IP address followed by a colon followed by
 the base-10 string representation of the port number..
 
+STB: Size Too Big - a packet with a dlen greater than the length of its data
+was received.
+
 Other Stuff:
 
 Connection IDs uniquely identify a stream for a protocol.  All bytes

@@ -42,7 +42,7 @@ class Transitions(unittest.TestCase):
         m.input(I_1)
         self.assertEquals(
             m.events,
-            ['exit_S_1', 'enter_S_1', 'transition_S_1_to_S_1', 'output_O_1'])
+            ['output_O_1'])
         self.assertEquals(m.state, S_1)
 
         m.events = []
@@ -56,12 +56,12 @@ class Transitions(unittest.TestCase):
         m.input(I_1)
         self.assertEquals(
             m.events,
-            ['exit_S_2', 'enter_S_2', 'transition_S_2_to_S_2', 'output_O_2'])
+            ['output_O_2'])
         self.assertEquals(m.state, S_2)
 
         m.events = []
         m.input(I_2)
         self.assertEquals(
             m.events,
-            ['exit_S_2', 'enter_S_2', 'transition_S_2_to_S_2', 'output_O_1'])
+            ['output_O_1'])
         self.assertEquals(m.state, S_2)

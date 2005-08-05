@@ -4,35 +4,35 @@ from vertex.statemachine import StateMachine, NOTHING
 
 # States
 
-CLOSED = 'closed'
-LISTEN = 'listen'
-SYN_RCVD = 'syn_rcvd'
-SYN_SENT = 'syn_sent'
-ESTABLISHED = 'established'
-CLOSE_WAIT = 'close_wait'
-LAST_ACK = 'last_ack'
-CLOSING = 'closing'
-FIN_WAIT_1 = 'fin_wait_1'
-FIN_WAIT_2 = 'fin_wait_2'
-TIME_WAIT = 'time_wait'
+CLOSED = 'CLOSED'
+LISTEN = 'LISTEN'
+SYN_RCVD = 'SYN_RCVD'
+SYN_SENT = 'SYN_SENT'
+ESTABLISHED = 'ESTABLISHED'
+CLOSE_WAIT = 'CLOSE_WAIT'
+LAST_ACK = 'LAST_ACK'
+CLOSING = 'CLOSING'
+FIN_WAIT_1 = 'FIN_WAIT_1'
+FIN_WAIT_2 = 'FIN_WAIT_2'
+TIME_WAIT = 'TIME_WAIT'
 
 # Network vocabulary
-SYN = 'syn'
-ACK = 'ack'
-SYN_ACK = 'syn_ack'
-FIN = 'fin'
-FIN_ACK = 'fin_ack'
-RST = 'rst'
+SYN = 'SYN'
+ACK = 'ACK'
+SYN_ACK = 'SYN_ACK'
+FIN = 'FIN'
+FIN_ACK = 'FIN_ACK'
+RST = 'RST'
 
 # Application vocabulary
-APP_PASSIVE_OPEN = 'passive_open'
-APP_ACTIVE_OPEN = 'active_open'
-APP_SEND_DATA = 'app_send'
-TIMEOUT = 'timeout'
-APP_CLOSE = 'app_close'
+APP_PASSIVE_OPEN = 'PASSIVE_OPEN'
+APP_ACTIVE_OPEN = 'ACTIVE_OPEN'
+APP_SEND_DATA = 'APP_SEND'
+TIMEOUT = 'TIMEOUT'
+APP_CLOSE = 'APP_CLOSE'
 
 # My own vocabulary:
-BROKEN = 'broken'
+BROKEN = 'BROKEN'
 
 
 class TCP(StateMachine):
@@ -88,7 +88,7 @@ class TCP(StateMachine):
             ACK: (NOTHING, TIME_WAIT),
             },
         TIME_WAIT: {
-            TIMEOUT: (NOTHING, CLOSED)
+            TIMEOUT: (NOTHING, CLOSED),
             },
         }
 
