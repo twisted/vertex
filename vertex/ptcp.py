@@ -1,4 +1,4 @@
-# -*- test-case-name: vertex.test.test_gin -*-
+# -*- test-case-name: vertex.test.test_ptcp -*-
 
 import struct, zlib
 import random
@@ -22,7 +22,7 @@ def _flagprop(flag):
             self.flags &= ~flag
     return property(lambda self: self.flags & flag, setter)
 
-class GinPacket(util.FancyStrMixin, object):
+class PtcpPacket(util.FancyStrMixin, object):
     showAttributes = (
         ('connID', 'connID', '%d'),
         ('data', 'data', '%r'),
@@ -90,7 +90,7 @@ class GinPacket(util.FancyStrMixin, object):
             self.connID, self.seqNum, self.ackNum, self.window,
             self.flags, checksum, dlen) + self.data
 
-class GinConnection(tcpdfa.TCP):
+class PtcpConnection(tcpdfa.TCP):
     """
     @ivar selfSequence: An index into our outgoing stream: the value
     which will be included in the next new outgoing packet as the
@@ -106,10 +106,10 @@ class GinConnection(tcpdfa.TCP):
 
     protocol = None
 
-    def __init__(self, connID, gin, factory):
+    def __init__(self, connID, ptcp, factory):
         tcpdfa.TCP.__init__(self)
         self.connID = connID
-        self.gin = gin
+        self.ptcp = ptcp
         self.factory = factory
         self._pending = []
         self._writeBufferEmptyCallbacks = []
@@ -165,7 +165,7 @@ class GinConnection(tcpdfa.TCP):
 
     def _reallyWrite(self):
         self._nagle = None
-        self.gin.sendPacket(self.originate(data=self._outgoingBytes[:self.mtu]))
+        self.ptcp.sendPacket(self.originate(data=self._outgoingBytes[:self.mtu]))
 
     disconnecting = False       # This is *TWISTED* level state-machine stuff,
                                 # not TCP-level.
@@ -209,7 +209,7 @@ class GinConnection(tcpdfa.TCP):
             self._writeLater()
 
     def originate(self, data='', syn=False, ack=False, fin=False):
-        p = GinPacket.create(self.connID,
+        p = PtcpPacket.create(self.connID,
                                 self.selfSequence,
                                 self.selfAcknowledged, data,
                                 syn=syn, ack=ack, fin=fin,
@@ -220,7 +220,7 @@ class GinConnection(tcpdfa.TCP):
         return p
 
     def stopListening(self):
-        del self.gin._connections[self.connID]
+        del self.ptcp._connections[self.connID]
 
     # State machine transition definitions, hooray.
 
@@ -231,7 +231,7 @@ class GinConnection(tcpdfa.TCP):
         self.factory.clientConnectionFailed(error.TimeoutError())
 
     def enter_CLOSED(self, packet=None):
-        del self.gin._connections[self.connID]
+        del self.ptcp._connections[self.connID]
 
     peerAddressTuple = None
 
@@ -247,7 +247,7 @@ class GinConnection(tcpdfa.TCP):
     def transition_LISTEN_to_SYN_SENT(self, packet):
         """
         Uh, what?  We were listening and we tried to send some bytes.
-        This is an error for Gin.
+        This is an error for Ptcp.
         """
         raise StateError("You can't write anything until someone connects to you.")
 
@@ -257,11 +257,11 @@ class GinConnection(tcpdfa.TCP):
         have a new baby connection.
         """
         try:
-            p = self.factory.buildProtocol(GinAddress(
+            p = self.factory.buildProtocol(PtcpAddress(
                     packet.peerAddressTuple, self.connID))
             p.makeConnection(self)
         except:
-            log.msg("Exception during Gin connection setup.")
+            log.msg("Exception during Ptcp connection setup.")
             log.err()
             self.loseConnection()
         else:
@@ -276,23 +276,23 @@ class GinConnection(tcpdfa.TCP):
         self.protocol = None
 
     def output_FIN_ACK(self, packet=None):
-        self.gin.sendPacket(self.originate(ack=True, fin=True))
+        self.ptcp.sendPacket(self.originate(ack=True, fin=True))
 
     def output_ACK(self, packet=None):
-        self.gin.sendPacket(self.originate(ack=True))
+        self.ptcp.sendPacket(self.originate(ack=True))
 
     def output_FIN(self, packet=None):
-        self.gin.sendPacket(self.originate(fin=True))
+        self.ptcp.sendPacket(self.originate(fin=True))
 
     def output_SYN_ACK(self, packet=None):
         self.selfSequence = 200
-        self.gin.sendPacket(self.originate(syn=True, ack=True))
+        self.ptcp.sendPacket(self.originate(syn=True, ack=True))
 
     def output_SYN(self, packet=None):
         self.selfSequence = 100
-        self.gin.sendPacket(self.originate(syn=True))
+        self.ptcp.sendPacket(self.originate(syn=True))
 
-class GinAddress(object):
+class PtcpAddress(object):
     # garbage
 
     def __init__(self, (host, port), connid):
@@ -301,12 +301,12 @@ class GinAddress(object):
         self.connid = connid
 
 
-class Gin(protocol.DatagramProtocol):
+class Ptcp(protocol.DatagramProtocol):
     # External API
     def listen(self, factory):
         self._lastConnID += 5 # random.randrange(2 ** 32)
         self._lastConnID %= 2 ** (struct.calcsize('L') * 8)
-        conn = self._connections[self._lastConnID] = GinConnection(
+        conn = self._connections[self._lastConnID] = PtcpConnection(
             self._lastConnID, self, factory)
         conn.input(tcpdfa.APP_PASSIVE_OPEN)
         return self._lastConnID
@@ -314,7 +314,7 @@ class Gin(protocol.DatagramProtocol):
 
     def connect(self, factory, host, port, connID):
         assert connID not in self._connections
-        conn = self._connections[connID] = GinConnection(
+        conn = self._connections[connID] = PtcpConnection(
             connID, self, factory)
         conn.peerAddressTuple = (host, port)
         conn.input(tcpdfa.APP_ACTIVE_OPEN)
@@ -338,11 +338,11 @@ class Gin(protocol.DatagramProtocol):
             # It can't be any good.
             return
 
-        pkt = GinPacket.decode(bytes, addr)
+        pkt = PtcpPacket.decode(bytes, addr)
 
         if pkt.dlen > len(pkt.data):
             self.sendPacket(
-                GinPacket.create(
+                PtcpPacket.create(
                     pkt.connID,
                     0,
                     0,

@@ -2,7 +2,7 @@
 from twisted.internet import reactor, protocol, defer
 from twisted.trial import unittest
 
-from vertex import gin
+from vertex import ptcp
 
 class TestProtocol(protocol.Protocol):
     buffer = ''
@@ -35,11 +35,11 @@ class TestProtocol(protocol.Protocol):
                 self._waiting = None
 
 
-class GinTransportTestCase(unittest.TestCase):
+class PtcpTransportTestCase(unittest.TestCase):
     def testVerySimpleConnection(self):
         print
-        serverTransport = gin.Gin()
-        clientTransport = gin.Gin()
+        serverTransport = ptcp.Ptcp()
+        clientTransport = ptcp.Ptcp()
         serverPort = reactor.listenUDP(0, serverTransport)
         clientPort = reactor.listenUDP(0, clientTransport)
 
