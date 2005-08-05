@@ -45,13 +45,14 @@ class PtcpPacket(util.FancyStrMixin, object):
                   rst=False, nat=False, stb=False,
                   destination=None):
         i = cls(connID, seqNum, ackNum, window,
-                0, zlib.crc32(data), len(data), data)
+                0, 0, len(data), data)
         i.syn = syn
         i.ack = ack
         i.fin = fin
         i.nat = nat
         i.rst = rst
         i.stb = stb
+        i.checksum = i.computeChecksum()
         i.destination = destination
         return i
     create = classmethod(create)
@@ -71,8 +72,11 @@ class PtcpPacket(util.FancyStrMixin, object):
 
 
     def verifyChecksum(self):
-        return len(self.data) == self.dlen and self.checksum == zlib.crc32(self.data)
+        return len(self.data) == self.dlen and self.checksum == self.computeChecksum()
 
+
+    def computeChecksum(self):
+        return zlib.crc32(self.data)
 
     def decode(cls, bytes, hostPortPair):
         fields = struct.unpack(_packetFormat, bytes[:_fixedSize])
@@ -84,7 +88,7 @@ class PtcpPacket(util.FancyStrMixin, object):
 
     def encode(self):
         dlen = len(self.data)
-        checksum = zlib.crc32(self.data)
+        checksum = self.computeChecksum()
         return struct.pack(
             _packetFormat,
             self.connID, self.seqNum, self.ackNum, self.window,
@@ -136,7 +140,7 @@ class PtcpConnection(tcpdfa.TCP):
             self.input(tcpdfa.RST, packet)
         elif packet.stb:
             [self.mtu] = struct.unpack('!H', packet.data)
-            print 'I CHANGED THE MTU TO', self.mtu
+            # print 'I CHANGED THE MTU TO', self.mtu
             self._writeLater()
             return
 
@@ -173,40 +177,63 @@ class PtcpConnection(tcpdfa.TCP):
 
     def loseConnection(self):
         self.disconnecting = True
-        self._whenWriteBufferEmpty(self.input, tcpdfa.APP_CLOSE)
-
-    def _whenWriteBufferEmpty(self, f, *a, **kw):
         if not self._outgoingBytes:
-            f(*a, **kw)
-        else:
-            self._writeBufferEmptyCallbacks.append((f, a, kw))
+            self._notifyWriteBufferEmpty()
+
 
     def _notifyWriteBufferEmpty(self):
-        wbec = self._writeBufferEmptyCallbacks
-        if wbec:
-            self._writeBufferEmptyCallbacks = []
-            for f, a, k in wbec:
-                f(*a, **k)
+        if self.producer is not None:
+            if (not self.streamingProducer) or self.producerPaused:
+                self.producerPaused = False
+                self.producer.resumeProducing()
+        elif self.disconnecting:
+            self.input(tcpdfa.APP_CLOSE)
 
-    protocolDied = False
+
+    disconnected = False
+    producer = None
+    producerPaused = False
+    streamingProducer = False
+
+    def registerProducer(self, producer, streaming):
+        if self.producer is not None:
+            raise RuntimeError(
+                "Cannot register producer %s, "
+                "because producer %s was never unregistered."
+                % (producer, self.producer))
+        if self.disconnected:
+            producer.stopProducing()
+        else:
+            self.producer = producer
+            self.streamingProducer = streaming
+            if not streaming and not self._outgoingBytes:
+                producer.resumeProducing()
+
+    def unregisterProducer(self):
+        self.producer = None
+        if not self._outgoingBytes:
+            self._notifyWriteBufferEmpty()
 
     def _maybeDeliver(self, seq, data):
-        if seq >= self.selfAcknowledged:
+        unreceived = ((seq + len(data)) - self.selfAcknowledged)
+        if unreceived > 0:
             self._pending.append((seq, data))
             self._pending.sort(key=lambda (seq, data): -seq)
-            count = 0
-            while self._pending and self._pending[-1][0] == self.selfAcknowledged:
-                data = self._pending.pop()[1]
-                count += len(data)
-                if self.protocol is not None:
-                    try:
-                        self.protocol.dataReceived(data)
-                    except:
-                        log.err()
-                        self.input(tcpdfa.APP_CLOSE)
-                        return
-            self.selfAcknowledged += count
-            print 'Acking due to delivered packets'
+            while self._pending and self._pending[-1][0] <= self.selfAcknowledged:
+                myseq, mydata = self._pending.pop()
+                myunrec = myseq + len(mydata) - self.selfAcknowledged
+                if myunrec > 0:
+                    recdata = mydata[-myunrec:]
+                    if self.protocol is not None:
+                        try:
+                            self.protocol.dataReceived(data)
+                        except:
+                            log.err()
+                            self.input(tcpdfa.APP_CLOSE)
+                            return
+                    self.selfAcknowledged += myunrec
+
+            # print 'Acking due to delivered packets'
             self._writeLater()
 
     def originate(self, data='', syn=False, ack=False, fin=False):
@@ -216,8 +243,8 @@ class PtcpConnection(tcpdfa.TCP):
                                 syn=syn, ack=ack, fin=fin,
                                 destination=self.peerAddressTuple)
         s = (syn and 'syn' or '') + (ack and 'ack' or '') + (fin and 'fin' or '')
-        if s:
-            print s
+#         if s:
+#             print s
         return p
 
     def stopListening(self):
@@ -269,7 +296,7 @@ class PtcpConnection(tcpdfa.TCP):
             self.protocol = p
 
     def exit_ESTABLISHED(self, packet=None):
-        print 'LEAVING ESTABLISHED AND CLOSING THE CONNECTION'
+        # print 'LEAVING ESTABLISHED AND CLOSING THE CONNECTION'
         try:
             self.protocol.connectionLost(error.ConnectionLost())
         except:
@@ -351,7 +378,7 @@ class Ptcp(protocol.DatagramProtocol):
             print "bad packet", pkt
             print pkt.dlen, len(pkt.data)
             print repr(pkt.data)
-            print hex(pkt.checksum), hex(zlib.crc32(pkt.data))
+            print hex(pkt.checksum), hex(pkt.computeChecksum())
         else:
             self.packetReceived(pkt)
 
