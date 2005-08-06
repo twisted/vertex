@@ -1,3 +1,4 @@
+# -*- test-case-name: vertex.test.test_ptcp -*-
 # Copyright 2005 Divmod, Inc.  See LICENSE file for details
 
 from vertex.statemachine import StateMachine, NOTHING

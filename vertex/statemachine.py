@@ -22,7 +22,7 @@ class StateMachine:
     def transition(self, oldstate, newstate, datum, *a, **kw):
         if oldstate == newstate:
             return
-        # print hex(id(self)), 'Going from', oldstate, 'to', newstate, 'because', datum
+        print hex(id(self)), 'Going from', oldstate, 'to', newstate, 'because', datum
         exitmeth = getattr(self, 'exit_%s' % (oldstate,), None)
         entermeth = getattr(self, 'enter_%s' % (newstate,), None)
         transmeth = getattr(self, 'transition_%s_to_%s' % (
