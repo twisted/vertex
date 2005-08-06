@@ -1,4 +1,4 @@
-# -*- test-case-name: vertex.test.test_ptcp.PtcpTransportTestCase -*-
+# -*- test-case-name: vertex.test.test_ptcp -*-
 
 import time
 import struct, zlib
@@ -281,6 +281,16 @@ class PtcpConnection(tcpdfa.TCP):
         # identify its relative sequence number.
 
         # XXX TODO: examine 'window' field and adjust sendWindowRemaining
+        if not segmentAcceptable(self.nextRecvSeqNum,
+                                 self.recvWindow,
+                                 packet.relativeSeq(),
+                                 packet.segmentLength()):
+            # We have to transmit an ack here since it's old data.  Maybe we
+            # need to check for that explicitly?
+            print 'PACKET W/ NO USABLE DATA'
+            if self.state == tcpdfa.ESTABLISHED:
+                self.originate(ack=True)
+            return
 
         SEG_ACK = packet.relativeAck()
 
@@ -333,46 +343,37 @@ class PtcpConnection(tcpdfa.TCP):
 
         # is it 'occupying a portion of valid receive sequence space'?  I think
         # this means 'packet which might acceptably contain useful data'
-        if segmentAcceptable(self.nextRecvSeqNum,
-                             self.recvWindow,
-                             packet.relativeSeq(),
-                             packet.segmentLength()):
-            print 'acceptable'
-            # OK!  It's acceptable!  Let's process the various bits of data.
-            if packet.syn:
-                print 'acceptable and syn, what?'
-                # Whoops, what?  SYNs probably can contain data, I think, but I
-                # certainly don't see anything in the spec about how to deal
-                # with this or in ethereal for how linux deals with it -glyph
-                if packet.dlen:
-                    print 'bad packet no data in syns'
-                    raise BadPacketError(
-                        "currently no data allowed in SYN packets: %r"
-                        % (packet,))
-                else:
-                    print 'seglength is one'
-                    assert packet.segmentLength() == 1
-            elif packet.data:
-                print 'okay got some real data'
-                # No for reals it is acceptable.
-                # Where is the useful data in the packet?
-                usefulData = packet.data[self.nextRecvSeqNum - packet.relativeSeq():]
-                print 'disparity', len(usefulData), len(packet.data)
-                # DONT check/slice the window size here, the acceptability code
-                # checked it, we can over-ack if the other side is buggy (???)
-                try:
-                    self.protocol.dataReceived(usefulData)
-                except:
-                    log.err()
-                    self.loseConnection()
-                print 'ack incr'
-                self.nextRecvSeqNum += len(usefulData)
-                print 'rel incr to', self.nextRecvSeqNum
-                self.originate(ack=True)
-        else:
-            # We have to transmit an ack here since it's old data.  Maybe we
-            # need to check for that explicitly?
-            print 'PACKET W/ NO USABLE DATA'
+        print 'acceptable'
+        # OK!  It's acceptable!  Let's process the various bits of data.
+        if packet.syn:
+            print 'acceptable and syn, what?'
+            # Whoops, what?  SYNs probably can contain data, I think, but I
+            # certainly don't see anything in the spec about how to deal
+            # with this or in ethereal for how linux deals with it -glyph
+            if packet.dlen:
+                print 'bad packet no data in syns'
+                raise BadPacketError(
+                    "currently no data allowed in SYN packets: %r"
+                    % (packet,))
+            else:
+                print 'seglength is one'
+                assert packet.segmentLength() == 1
+        elif packet.data:
+            print 'okay got some real data'
+            # No for reals it is acceptable.
+            # Where is the useful data in the packet?
+            usefulData = packet.data[self.nextRecvSeqNum - packet.relativeSeq():]
+            print 'disparity', len(usefulData), len(packet.data)
+            # DONT check/slice the window size here, the acceptability code
+            # checked it, we can over-ack if the other side is buggy (???)
+            try:
+                self.protocol.dataReceived(usefulData)
+            except:
+                log.err()
+                self.loseConnection()
+            print 'ack incr'
+            self.nextRecvSeqNum += len(usefulData)
+            print 'rel incr to', self.nextRecvSeqNum
             self.originate(ack=True)
 
         if packet.fin:
@@ -422,7 +423,7 @@ class PtcpConnection(tcpdfa.TCP):
             print 'but nothing to do'
 
     _retransmitter = None
-    _retransmitTimeout = 0.5
+    _retransmitTimeout = 0.05
 
     def _retransmitLater(self):
         if self._retransmitter is None:
@@ -430,10 +431,14 @@ class PtcpConnection(tcpdfa.TCP):
             self._retransmitter = reactor.callLater(self._retransmitTimeout, self._reallyRetransmit)
 
     def _reallyRetransmit(self):
-        print 'Hooray'
-        self._retransmitTimeout = None
-        self._writeLater()
-
+        # XXX TODO: packet fragmentation & coalescing.
+        print 'doing retransmission of entire queue now', len(self.retransmissionQueue)
+        self._retransmitter = None
+        if self.retransmissionQueue:
+            for packet in self.retransmissionQueue:
+                packet.ackNum = (self.nextRecvSeqNum + self.peerSendISN) % (2**32)
+                self.ptcp.sendPacket(packet)
+            self._retransmitLater()
 
     disconnecting = False       # This is *TWISTED* level state-machine stuff,
                                 # not TCP-level.
@@ -502,6 +507,7 @@ class PtcpConnection(tcpdfa.TCP):
                 if self.retransmissionQueue[-1].fin:
                     raise AssertionError("Sending data after FIN??!")
             self.retransmissionQueue.append(p)
+            self._retransmitLater()
             if len(self.retransmissionQueue) > 5:
                 # This is a random number (5) because I ought to be summing the
                 # packet lengths or something.
