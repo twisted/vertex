@@ -165,18 +165,13 @@ def ISN():
 
 def segmentAcceptable(RCV_NXT, RCV_WND, SEG_SEQ, SEG_LEN):
     # RFC page 26.
-    print 'segmentAcceptable', RCV_NXT, RCV_WND, SEG_SEQ, SEG_LEN
     if SEG_LEN == 0 and RCV_WND == 0:
-        print 'check 1'
         return SEG_SEQ == RCV_NXT
     if SEG_LEN == 0 and RCV_WND > 0:
-        print 'check 2'
         return ((RCV_NXT <= SEG_SEQ) and (SEG_SEQ < RCV_NXT + RCV_WND))
     if SEG_LEN > 0 and RCV_WND == 0:
-        print 'check 3'
         return False
     if SEG_LEN > 0 and RCV_WND > 0:
-        print 'check 4'
         return ((  (RCV_NXT <= SEG_SEQ) and (SEG_SEQ < RCV_NXT + RCV_WND))
                 or ((RCV_NXT <= SEG_SEQ+SEG_LEN-1) and
                     (SEG_SEQ+SEG_LEN-1 < RCV_NXT + RCV_WND)))
@@ -262,16 +257,13 @@ class PtcpConnection(tcpdfa.TCP):
         else:
             # we're a client
             assert self.peerAddressTuple == packet.peerAddressTuple
-        print 'processing syn'
         if self.setPeerISN:
-            print 'set peer ISN already'
             if self.peerSendISN != packet.seqNum:
                 raise BadPacketError(
                     "Peer ISN was already set to %s but incoming packet "
                     "tried to set it to %s" % (
                         self.peerSendISN, packet.seqNum))
             return
-        print 'initializing peer ISN & seqNum', packet.seqNum, self.nextRecvSeqNum
         self.setPeerISN = True
         self.peerSendISN = packet.seqNum
         self.nextRecvSeqNum = 1 # _RELATIVE_
@@ -281,13 +273,15 @@ class PtcpConnection(tcpdfa.TCP):
         # identify its relative sequence number.
 
         # XXX TODO: examine 'window' field and adjust sendWindowRemaining
+        # is it 'occupying a portion of valid receive sequence space'?  I think
+        # this means 'packet which might acceptably contain useful data'
         if not segmentAcceptable(self.nextRecvSeqNum,
                                  self.recvWindow,
                                  packet.relativeSeq(),
                                  packet.segmentLength()):
-            # We have to transmit an ack here since it's old data.  Maybe we
-            # need to check for that explicitly?
-            print 'PACKET W/ NO USABLE DATA'
+            # We have to transmit an ack here since it's old data.  We probably
+            # need to ack in more states than just ESTABLISHED... but which
+            # ones?
             if self.state == tcpdfa.ESTABLISHED:
                 self.originate(ack=True)
             return
@@ -295,75 +289,50 @@ class PtcpConnection(tcpdfa.TCP):
         SEG_ACK = packet.relativeAck()
 
         if packet.ack:
-            print 'processing ack'
             if (self.oldestUnackedSendSeqNum < SEG_ACK and
                 SEG_ACK <= self.nextSendSeqNum):
                 # According to the spec, an 'acceptable ack
-                print 'ack acceptable'
-
-                print 'retransmit logic'
                 rq = self.retransmissionQueue
                 while rq:
                     segmentOnQueue = rq[0]
                     qSegSeq = segmentOnQueue.relativeSeq()
                     if qSegSeq + segmentOnQueue.segmentLength() <= SEG_ACK:
-                        print 'fully acknowledged', segmentOnQueue
                         # fully acknowledged, as per RFC!
                         rq.pop(0)
                         self.sendWindowRemaining += segmentOnQueue.segmentLength()
                     else:
-                        print 'oops, not acknowledged', rq
-                        # Ahem.
                         break
                 else:
                     # write buffer is empty; alert the application layer.
-                    print 'acked until write buffer empty'
                     self._writeBufferEmpty()
                 self.oldestUnackedSendSeqNum = SEG_ACK
                 if not packet.syn:
                     # handled below
-                    print 'ACK input'
                     self.input(tcpdfa.ACK, packet)
-                else:
-                    print 'should have already sent SYN_ACK...'
-            else:
-                # probably not really an error
-                print 'unacceptable ack'
-                #raise BadPacketError('UNacceptable ack')
 
-        print 'packet received by connection'
         if packet.syn:
             if packet.ack:
                 val = tcpdfa.SYN_ACK
             else:
                 val = tcpdfa.SYN
-            print 'sending', val, 'to state machine'
             self.nextRecvSeqNum += 1
             self.input(val, packet)
 
-        # is it 'occupying a portion of valid receive sequence space'?  I think
-        # this means 'packet which might acceptably contain useful data'
-        print 'acceptable'
         # OK!  It's acceptable!  Let's process the various bits of data.
         if packet.syn:
-            print 'acceptable and syn, what?'
             # Whoops, what?  SYNs probably can contain data, I think, but I
             # certainly don't see anything in the spec about how to deal
             # with this or in ethereal for how linux deals with it -glyph
             if packet.dlen:
-                print 'bad packet no data in syns'
                 raise BadPacketError(
                     "currently no data allowed in SYN packets: %r"
                     % (packet,))
             else:
-                print 'seglength is one'
                 assert packet.segmentLength() == 1
         elif packet.data:
-            print 'okay got some real data'
             # No for reals it is acceptable.
             # Where is the useful data in the packet?
             usefulData = packet.data[self.nextRecvSeqNum - packet.relativeSeq():]
-            print 'disparity', len(usefulData), len(packet.data)
             # DONT check/slice the window size here, the acceptability code
             # checked it, we can over-ack if the other side is buggy (???)
             try:
@@ -371,13 +340,10 @@ class PtcpConnection(tcpdfa.TCP):
             except:
                 log.err()
                 self.loseConnection()
-            print 'ack incr'
             self.nextRecvSeqNum += len(usefulData)
-            print 'rel incr to', self.nextRecvSeqNum
             self.originate(ack=True)
 
         if packet.fin:
-            print 'FIN'
             self.input(tcpdfa.FIN, packet)
 
 
@@ -395,15 +361,10 @@ class PtcpConnection(tcpdfa.TCP):
 
 
     def _writeLater(self):
-        print 'writing later'
         if self._nagle is None:
-            print 'nagle is None'
-            self._nagle = reactor.callLater(0, self._reallyWrite)
-        else:
-            print 'nagle already set!?'
+            self._nagle = reactor.callLater(0.001, self._reallyWrite)
 
     def _originateOneData(self):
-        print 'ORIG 1 DAT', self.sendWindowRemaining, self.mtu
         amount = min(self.sendWindowRemaining, self.mtu)
         sendOut = self._outgoingBytes[:amount]
         self._outgoingBytes = self._outgoingBytes[amount:]
@@ -412,27 +373,29 @@ class PtcpConnection(tcpdfa.TCP):
 
     def _reallyWrite(self):
         self._nagle = None
-        print 'really writing'
         if self._outgoingBytes:
-            print 'really REALLY writing'
             while self.sendWindowRemaining and self._outgoingBytes:
-                print 'originating data', len(self._outgoingBytes)
                 self._originateOneData()
-                print 'originated', len(self._outgoingBytes)
-        else:
-            print 'but nothing to do'
 
     _retransmitter = None
     _retransmitTimeout = 0.05
 
     def _retransmitLater(self):
         if self._retransmitter is None:
-            print 'Setting up retransmitter', self._retransmitTimeout
             self._retransmitter = reactor.callLater(self._retransmitTimeout, self._reallyRetransmit)
+
+    def _stopRetransmitting(self):
+        # used both as a quick-and-dirty test shutdown hack and a way to shut
+        # down when we die...
+        if self._retransmitter is not None:
+            self._retransmitter.cancel()
+            self._retransmitter = None
+
+    def enter_CLOSED(self, *ign):
+        self._stopRetransmitting()
 
     def _reallyRetransmit(self):
         # XXX TODO: packet fragmentation & coalescing.
-        print 'doing retransmission of entire queue now', len(self.retransmissionQueue)
         self._retransmitter = None
         if self.retransmissionQueue:
             for packet in self.retransmissionQueue:
@@ -450,13 +413,9 @@ class PtcpConnection(tcpdfa.TCP):
 
 
     def _writeBufferEmpty(self):
-        print 'write buffer empty'
         if self._outgoingBytes:
-            print 'really writing'
             self._reallyWrite()
-        else:
-            print 'no data left'
-        if self.producer is not None:
+        elif self.producer is not None:
             if (not self.streamingProducer) or self.producerPaused:
                 self.producerPaused = False
                 self.producer.resumeProducing()
@@ -498,9 +457,7 @@ class PtcpConnection(tcpdfa.TCP):
                               destination=self.peerAddressTuple)
         # do we want to enqueue this packet for retransmission?
         sl = p.segmentLength()
-        print 'incr', self.nextSendSeqNum, sl
         self.nextSendSeqNum += sl
-        print self.nextSendSeqNum
 
         if p.mustRetransmit():
             if self.retransmissionQueue:
@@ -525,7 +482,6 @@ class PtcpConnection(tcpdfa.TCP):
         self.factory.clientConnectionFailed(error.TimeoutError())
 
     def enter_TIME_WAIT(self, packet=None):
-        print 'I CLOSED'
         del self.ptcp._connections[self.connID]
         for dcall in self._nagle, self._retransmitter:
             if dcall is not None:
@@ -557,7 +513,6 @@ class PtcpConnection(tcpdfa.TCP):
             self.protocol = p
 
     def exit_ESTABLISHED(self, packet=None):
-        # print 'LEAVING ESTABLISHED AND CLOSING THE CONNECTION'
         try:
             self.protocol.connectionLost(error.ConnectionLost())
         except:
@@ -605,7 +560,6 @@ class Ptcp(protocol.DatagramProtocol):
         return connID
 
     def sendPacket(self, packet):
-        print '=====>>>>>', packet
         self.transport.write(packet.encode(), packet.destination)
 
 
@@ -644,7 +598,6 @@ class Ptcp(protocol.DatagramProtocol):
             self.packetReceived(pkt)
 
     def packetReceived(self, packet):
-        print '<<<<<=====', packet
         if packet.nat:
             if packet.syn:
                 # Send them stuff about their address

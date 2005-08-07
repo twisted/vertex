@@ -15,11 +15,9 @@ class TestProtocol(protocol.Protocol):
         self.buffer = []
 
     def connectionMade(self):
-        # print 'CONNECTION MADE'
         self.onConnect.callback(None)
 
     def connectionLost(self, reason):
-        # print 'DISCO INFERNO'
         self.onDisconn.callback(None)
 
     def gotBytes(self, bytes):
@@ -30,7 +28,6 @@ class TestProtocol(protocol.Protocol):
         return self._waiting[0]
 
     def dataReceived(self, bytes):
-        # print 'yay', len(bytes)
         self.buffer.append(bytes)
         if self._waiting is not None:
             bytes = ''.join(self.buffer)
@@ -48,7 +45,6 @@ class TestProducerProtocol(protocol.Protocol):
 
     def resumeProducing(self):
         self.count += 1
-        # print 'Resumed producing for the', self.count, 'th time.'
         if self.count < self.NUM_WRITES:
             self.transport.write(chr(self.count) * self.WRITE_SIZE)
             if self.count == self.NUM_WRITES - 1:
@@ -63,6 +59,10 @@ class PtcpTransportTestCase(unittest.TestCase):
                       ServerProtocol=TestProtocol, ClientProtocol=TestProtocol):
         serverProto = ServerProtocol()
         clientProto = ClientProtocol()
+
+        self.serverProto = serverProto
+        self.clientProto = clientProto
+
         sf = protocol.ServerFactory()
         sf.protocol = lambda: serverProto
 
@@ -74,6 +74,9 @@ class PtcpTransportTestCase(unittest.TestCase):
         serverPort = reactor.listenUDP(0, serverTransport)
         clientPort = reactor.listenUDP(0, clientTransport)
 
+        self.clientPort = clientPort
+        self.serverPort = serverPort
+
         return (
             serverProto, clientProto,
             sf, cf,
@@ -82,18 +85,18 @@ class PtcpTransportTestCase(unittest.TestCase):
             )
 
 
+    def tearDown(self):
+        self.serverPort.stopListening()
+        self.clientPort.stopListening()
+        for p in self.serverProto, self.clientProto:
+            p.transport._stopRetransmitting()
+
     def testVerySimpleConnection(self):
         (serverProto, clientProto,
          sf, cf,
          serverTransport, clientTransport,
          serverPort, clientPort) = self.setUpForATest()
 
-        def tearDown(ign):
-            # print 'TEST TEARING DOWN'
-            return defer.DeferredList([
-                    serverPort.stopListening(),
-                    clientPort.stopListening()
-                    ])
 
         clientConnID = clientTransport.connect(cf, '127.0.0.1', serverPort.getHost().port)
 
@@ -123,7 +126,7 @@ class PtcpTransportTestCase(unittest.TestCase):
         dl = defer.DeferredList([serverProto.onConnect, clientProto.onConnect])
         dl.addCallback(sendSomeBytes)
         dl.addCallback(loseConnections)
-        return dl.addCallback(tearDown)
+        return dl
 
 
     def testProducerConsumer(self):
@@ -134,21 +137,12 @@ class PtcpTransportTestCase(unittest.TestCase):
             ServerProtocol=TestProducerProtocol)
 
         def disconnected(ignored):
-            # print 'Disconnected'
             self.assertEquals(
                 ''.join(clientProto.buffer),
                 ''.join([chr(n) * serverProto.WRITE_SIZE for n in range(serverProto.NUM_WRITES)]))
-            # print 'Disconnect Done'
-
-        def tearDown(ign):
-            # print 'TEST TEARING DOWN'
-            return defer.DeferredList([
-                    serverPort.stopListening(),
-                    clientPort.stopListening()
-                    ])
 
         clientConnID = clientTransport.connect(cf, '127.0.0.1', serverPort.getHost().port)
-        return clientProto.onDisconn.addCallback(disconnected).addCallback(tearDown)
+        return clientProto.onDisconn.addCallback(disconnected)
 
 
 
