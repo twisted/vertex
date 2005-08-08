@@ -1,4 +1,4 @@
-# -*- test-case-name: vertex.test.test_ptcp -*-
+# -*- test-case-name: vertex.test.test_ptcp.RandomLossyTransportTestCase.testVerySimpleConnection -*-
 
 import time
 import struct, zlib
@@ -155,6 +155,38 @@ class PtcpPacket(util.FancyStrMixin, object):
             self.connID, self.seqNum, self.ackNum, self.window,
             self.flags, checksum, dlen) + self.data
 
+    def fragment(self, mtu):
+        if self.dlen < mtu:
+            return [self]
+        assert not self.syn, "should not be originating syn packets w/ data"
+        seqOfft = 0
+        L = []
+        # XXX TODO: need to take seqLaps into account, etc.
+        for chunk in iterchunks(self.data, mtu):
+            last = self.create(self.connID,
+                               self.seqNum + seqOfft,
+                               self.ackNum,
+                               chunk,
+                               self.window,
+                               destination=self.destination,
+                               ack=self.ack)
+            L.append(last)
+            seqOfft += len(chunk)
+        if self.fin:
+            last.fin = self.fin
+            last.checksum = last.computeChecksum()
+        return L
+
+
+def iterchunks(data, chunksize):
+    """iterate chunks of data
+    """
+    offt = 0
+    while offt < len(data):
+        yield data[offt:offt+chunksize]
+        offt += chunksize
+
+
 def ISN():
     """
     Initial Sequence Number generator.
@@ -224,7 +256,7 @@ class PtcpConnection(tcpdfa.TCP):
 
     """
 
-    mtu = 4000 # 16384
+    mtu = 16384
 
     recvWindow = mtu
     sendWindow = mtu
@@ -271,6 +303,14 @@ class PtcpConnection(tcpdfa.TCP):
     def packetReceived(self, packet):
         # XXX TODO: probably have to do something to the packet here to
         # identify its relative sequence number.
+
+        if packet.stb:
+            [self.mtu] = struct.unpack('!H', packet.data)
+            rq = []
+            for pkt in self.retransmissionQueue:
+                rq.extend(pkt.fragment(self.mtu))
+            self.retransmissionQueue = rq
+            return
 
         # XXX TODO: examine 'window' field and adjust sendWindowRemaining
         # is it 'occupying a portion of valid receive sequence space'?  I think
@@ -332,6 +372,8 @@ class PtcpConnection(tcpdfa.TCP):
         elif packet.data:
             # No for reals it is acceptable.
             # Where is the useful data in the packet?
+            if packet.relativeSeq() > self.nextRecvSeqNum:
+                return
             usefulData = packet.data[self.nextRecvSeqNum - packet.relativeSeq():]
             # DONT check/slice the window size here, the acceptability code
             # checked it, we can over-ack if the other side is buggy (???)
@@ -421,6 +463,14 @@ class PtcpConnection(tcpdfa.TCP):
                 self.producer.resumeProducing()
         elif self.disconnecting:
             self.input(tcpdfa.APP_CLOSE)
+
+
+    def _writeBufferFull(self):
+        if (self.producer is not None
+            and not self.producerPaused
+            and self.streamingProducer):
+            self.producerPaused = True
+            self.producer.pauseProducing()
 
 
     disconnected = False
@@ -580,7 +630,6 @@ class Ptcp(protocol.DatagramProtocol):
         pkt = PtcpPacket.decode(bytes, addr)
 
         if pkt.dlen > len(pkt.data):
-            print 'MTU'
             self.sendPacket(
                 PtcpPacket.create(
                     pkt.connID,

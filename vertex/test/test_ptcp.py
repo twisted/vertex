@@ -1,5 +1,6 @@
+# -*- test-case-name: vertex.test.test_ptcp -*-
 
-import random
+import random, os
 
 from twisted.internet import reactor, protocol, defer
 from twisted.trial import unittest
@@ -22,7 +23,7 @@ class TestProtocol(protocol.Protocol):
 
     def gotBytes(self, bytes):
         assert self._waiting is None
-        if self.buffer == bytes:
+        if ''.join(self.buffer) == bytes:
             return defer.succeed(None)
         self._waiting = (defer.Deferred(), bytes)
         return self._waiting[0]
@@ -31,6 +32,10 @@ class TestProtocol(protocol.Protocol):
         self.buffer.append(bytes)
         if self._waiting is not None:
             bytes = ''.join(self.buffer)
+            if not self._waiting[1].startswith(bytes):
+                x = len(os.path.commonprefix([bytes, self._waiting[1]]))
+                print x
+                print 'it goes wrong starting with', repr(bytes[x:x+100]), repr(self._waiting[1][x:x+100])
             if bytes == self._waiting[1]:
                 self._waiting[0].callback(None)
                 self._waiting = None
@@ -148,7 +153,7 @@ class PtcpTransportTestCase(unittest.TestCase):
 
 def randomLossy(method):
     def worseMethod(*a, **kw):
-        if random.choice((True, False, False, False)):
+        if random.choice((True, False, False)):
             method(*a, **kw)
     return worseMethod
 
@@ -161,3 +166,15 @@ class RandomLossyTransportTestCase(PtcpTransportTestCase):
         results[-1].writeSequence = randomLossy(results[-1].writeSequence)
         return results
 
+
+def insufficientTransmitter(method,  mtu):
+    def worseMethod(bytes, addr):
+        method(bytes[:mtu], addr)
+    return worseMethod
+
+class SmallMTUTransportTestCase(PtcpTransportTestCase):
+    def setUpForATest(self, *a, **kw):
+        results = PtcpTransportTestCase.setUpForATest(self, *a, **kw)
+        results[-2].write = insufficientTransmitter(results[-2].write, 512)
+        results[-1].write = insufficientTransmitter(results[-1].write, 512)
+        return results
