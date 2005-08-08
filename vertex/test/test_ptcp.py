@@ -96,6 +96,28 @@ class PtcpTransportTestCase(unittest.TestCase):
         for p in self.serverProto, self.clientProto:
             p.transport._stopRetransmitting()
 
+
+    def testWhoAmI(self):
+        (serverProto, clientProto,
+         sf, cf,
+         serverTransport, clientTransport,
+         serverPort, clientPort) = self.setUpForATest()
+
+        def gotAddress(results):
+            (serverSuccess, serverAddress), (clientSuccess, clientAddress) = results
+            self.failUnless(serverSuccess)
+            self.failUnless(clientSuccess)
+
+            self.assertEquals(serverAddress[1], serverPort.getHost().port)
+            self.assertEquals(clientAddress[1], clientPort.getHost().port)
+
+        def connectionsMade(ignored):
+            return defer.DeferredList([serverProto.transport.whoami(), clientProto.transport.whoami()]).addCallback(gotAddress)
+
+        clientConnID = clientTransport.connect(cf, '127.0.0.1', serverPort.getHost().port)
+
+        return defer.DeferredList([serverProto.onConnect, clientProto.onConnect]).addCallback(connectionsMade)
+
     def testVerySimpleConnection(self):
         (serverProto, clientProto,
          sf, cf,

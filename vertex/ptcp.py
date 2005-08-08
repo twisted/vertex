@@ -1,10 +1,10 @@
-# -*- test-case-name: vertex.test.test_ptcp.RandomLossyTransportTestCase.testVerySimpleConnection -*-
+# -*- test-case-name: vertex.test.test_ptcp -*-
 
 import time
 import struct, zlib
 import random
 
-from twisted.internet import protocol, error, reactor
+from twisted.internet import protocol, error, reactor, defer
 from twisted.python import log, util
 
 from vertex import tcpdfa
@@ -280,6 +280,8 @@ class PtcpConnection(tcpdfa.TCP):
         self.peerSendISN = 0
         self.setPeerISN = False
 
+        self._whoamiDeferreds = []
+
     peerSendISN = None
 
     def enter_SYN_RCVD(self, packet):
@@ -300,17 +302,54 @@ class PtcpConnection(tcpdfa.TCP):
         self.peerSendISN = packet.seqNum
         self.nextRecvSeqNum = 1 # _RELATIVE_
 
+
+    _whoIAm = None
+    def whoami(self):
+        if self._whoIAm is not None:
+            return defer.succeed(self._whoIAm)
+
+        if len(self._whoamiDeferreds) == 0:
+            self.originate(syn=True, nat=True)
+
+        d = defer.Deferred()
+        self._whoamiDeferreds.append(d)
+        return d
+
+
+    def _gotAddress(self, host, port):
+        if self._whoamiDeferreds is not None:
+            waiting = self._whoamiDeferreds
+            self._whoamiDeferreds = None
+            self._whoIAm = (host, port)
+            for d in waiting:
+                d.callback((host, port))
+
+
     def packetReceived(self, packet):
         # XXX TODO: probably have to do something to the packet here to
         # identify its relative sequence number.
 
         if packet.stb:
+            # Shrink the MTU
             [self.mtu] = struct.unpack('!H', packet.data)
             rq = []
             for pkt in self.retransmissionQueue:
                 rq.extend(pkt.fragment(self.mtu))
             self.retransmissionQueue = rq
             return
+
+        if packet.nat:
+            if packet.syn:
+                # Send them stuff about their address
+                self.originate(ack=True, nat=True,
+                               data=('%s %d' % packet.peerAddressTuple))
+            elif packet.ack:
+                # Parse stuff about our address
+                addr = packet.data.split(None, 1)
+                host, port = addr[0], int(addr[1])
+                self._gotAddress(host, port)
+            return
+
 
         # XXX TODO: examine 'window' field and adjust sendWindowRemaining
         # is it 'occupying a portion of valid receive sequence space'?  I think
@@ -497,13 +536,13 @@ class PtcpConnection(tcpdfa.TCP):
         if not self._outgoingBytes:
             self._writeBufferEmpty()
 
-    def originate(self, data='', syn=False, ack=False, fin=False):
+    def originate(self, data='', syn=False, ack=False, fin=False, nat=False):
         p = PtcpPacket.create(self.connID,
                               seqNum=(self.nextSendSeqNum + self.hostSendISN) % (2**32),
                               ackNum=(self.nextRecvSeqNum + self.peerSendISN) % (2**32),
                               data=data,
                               window=self.recvWindow,
-                              syn=syn, ack=ack, fin=fin,
+                              syn=syn, ack=ack, fin=fin, nat=nat,
                               destination=self.peerAddressTuple)
         # do we want to enqueue this packet for retransmission?
         sl = p.segmentLength()
@@ -647,22 +686,11 @@ class Ptcp(protocol.DatagramProtocol):
             self.packetReceived(pkt)
 
     def packetReceived(self, packet):
-        if packet.nat:
-            if packet.syn:
-                # Send them stuff about their address
-                pass
-            elif packet.ack:
-                # Parse stuff about our address
-                pass
-            else:
-                # Uh, what?
-                pass
-        else:
-            packey = (packet.connID, packet.peerAddressTuple)
-            if packey not in self._connections:
-                conn = PtcpConnection(packet.connID, self,
-                                      self.factory, packet.peerAddressTuple)
-                conn.input(tcpdfa.APP_PASSIVE_OPEN)
-                self._connections[packey] = conn
-            self._connections[packey].packetReceived(packet)
+        packey = (packet.connID, packet.peerAddressTuple)
+        if packey not in self._connections:
+            conn = PtcpConnection(packet.connID, self,
+                                  self.factory, packet.peerAddressTuple)
+            conn.input(tcpdfa.APP_PASSIVE_OPEN)
+            self._connections[packey] = conn
+        self._connections[packey].packetReceived(packet)
 
