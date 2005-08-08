@@ -349,6 +349,7 @@ class Q2QConnectionTestCase(unittest.TestCase):
         # log.clearIgnores()
 
 class ConnectionTestMixin:
+
     def testConnectWithIntroduction(self):
         ponged = defer.Deferred()
         self.serverService2.connectQ2Q(self.fromAddress,
@@ -375,14 +376,21 @@ class ConnectionTestMixin:
 
 
     def testListening(self):
+
+        # print 'listening now'
+        
         self.clientServerService = util.wait(self.addClientService(
                 self.toAddress, 'aaaa', self.serverService))
+
+        # print 'listening success'
 
         ponyFactory = OneTrickPonyServerFactory()
         ponged = defer.Deferred()
         util.wait(self.clientServerService.listenQ2Q(self.toAddress,
                                                 {'pony2': ponyFactory},
                                                 'ponies suck'))
+
+        # print 'really success listening'
 
         self.clientClientService = util.wait(self.addClientService(
                 self.fromAddress, 'bbbb', self.serverService2))
@@ -391,6 +399,8 @@ class ConnectionTestMixin:
                                             self.toAddress,
                                             'pony2',
                                             otpcf)
+
+        # print 'no way we get here'
         answerBox = util.wait(ponged)
 
         T = otpcf.proto.transport
@@ -402,15 +412,27 @@ class ConnectionTestMixin:
     def testChooserGetsThreeChoices(self):
         ponyFactory = OneTrickPonyServerFactory()
         self.testListening()
+
+        # print 'dang yo'
+
         self.clientServerService2 = util.wait(self.addClientService(
                 self.toAddress, 'aaaa', self.serverService))
+
+        # print 'ultra frack'
+
         util.wait(self.clientServerService2.listenQ2Q(self.toAddress,
                                                       {'pony': ponyFactory},
                                                       'ponies are weird'))
+
+        # print 'frack'
+
         ponged = defer.Deferred()
         util.wait(self.clientServerService.listenQ2Q(self.toAddress,
                                                      {'pony': ponyFactory},
                                                      'ponies rule'))
+
+        # print 'WAITING IS DONE'
+
         expectedList = ['ponies rule', 'ponies are weird', 'test-description']
         def chooser(servers):
             self.failUnlessEqual(len(servers), 3)

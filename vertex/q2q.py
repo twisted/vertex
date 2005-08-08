@@ -1,4 +1,4 @@
-# -*- test-case-name: vertex.test.test_q2q.UDPConnection -*-
+# -*- test-case-name: vertex.test.test_q2q -*-
 # Copyright 2005 Divmod, Inc.  See LICENSE file for details
 
 # stdlib
@@ -1708,10 +1708,12 @@ class _AddressDiscoveryProtocol(protocol.Protocol):
         self.addrDiscDef = addrDiscDef
 
     def _done(self, passthrough):
+        # print 'awesome', passthrough
         self.transport.loseConnection()
         return passthrough
 
     def connectionMade(self):
+        # print 'woo conn'
         return self.transport.whoami().addBoth(
             self._done).chainDeferred(
             self.addrDiscDef)
@@ -1722,6 +1724,7 @@ class _AddressDiscoveryFactory(protocol.ClientFactory):
         self.addressDiscoveredDeferred = addressDiscoveredDeferred
 
     def buildProtocol(self, addr):
+        # print 'sweet'
         return _AddressDiscoveryProtocol(self.addressDiscoveredDeferred)
 
 
@@ -1729,11 +1732,12 @@ def _noResults(*x):
     return []
 
 class PTCPConnectionDispatcher(object):
-    def __init__(self):
+    def __init__(self, factory):
+        self.factory = factory
         self._ports = {}
 
     def seedNAT(self, (host, port)):
-        proto = ptcp.Ptcp('hello')
+        proto = ptcp.Ptcp(self.factory)
         proto.peerAddressTuple = (host, port)
         p = reactor.listenUDP(0, proto)
         portNum = p.getHost().port
@@ -1742,22 +1746,31 @@ class PTCPConnectionDispatcher(object):
         return portNum
 
     def bindNewPort(self):
-        p = reactor.listenUDP(0, ptcp.Ptcp(10))
+        p = reactor.listenUDP(0, ptcp.Ptcp(self.factory))
         portNum = p.getHost().port
         self._ports[portNum] = p
         return portNum
 
     def connectPTCP(self, host, port, factory):
-        proto = ptcp.Ptcp(5j)
+        proto = ptcp.Ptcp(self.factory)
         p = reactor.listenUDP(0, proto)
         self._ports[p.getHost().port] = p
         return proto.connect(factory, host, port)
 
     def iterconnections(self):
-        pass
+        for p in self._ports.itervalues():
+            for c in p.protocol._connections.itervalues():
+                yield c
 
     def killAllConnections(self):
-        return defer.succeed(None)
+        dl = []
+        for p in self._ports.itervalues():
+            for c in p.protocol._connections.itervalues():
+                c._stopRetransmitting()
+            dl.append(defer.maybeDeferred(p.stopListening))
+        self._ports = {}
+        return defer.DeferredList(dl)
+
 
 class Q2QService(service.MultiService, protocol.ServerFactory):
     # server factory stuff
@@ -1843,15 +1856,19 @@ class Q2QService(service.MultiService, protocol.ServerFactory):
 
     _publicUDPPort = None
 
-    def _retrieveRemoteCertificate(self, registrationServerAddress):
+    def _retrievePublicUDPPortNumber(self, registrationServerAddress):
         # Create a PTCP port, bounce some traffic off the indicated server,
         # wait for it to tell us what our address is
-        self._publicUDPFactory = _PTCPQ2QFactory(self)
         self._publicPTCPServer = ptcp.Ptcp(self._publicUDPFactory)
         self._publicUDPPort = reactor.listenUDP(0, self._publicPTCPServer)
 
+        # print 'HELlO'
+
         d = defer.Deferred()
         addressDiscoveryFactory = _AddressDiscoveryFactory(d)
+
+        # print 'connecting to!!!!', addressDiscoveryFactory, registrationServerAddress
+
         self._publicPTCPServer.connect(addressDiscoveryFactory,
                                        *registrationServerAddress)
         return d
@@ -1884,7 +1901,7 @@ class Q2QService(service.MultiService, protocol.ServerFactory):
                 proto.notifyOnConnectionLost(shutdown)
                 return listenResult
 
-            if self._publicUDPPort is None:
+            if self.dispatcher is not None:
                 gp = proto.transport.getPeer()
                 udpAddress = (gp.host, gp.port)
                 pubUDPDeferred = self._retrievePublicUDPPortNumber(udpAddress)
@@ -2019,8 +2036,13 @@ class Q2QService(service.MultiService, protocol.ServerFactory):
                 Q2QTCPListenerFactory(self))
         if uportnum is None:
             uportnum = self.inboundUDPPortnum
+
+        self._publicUDPFactory = Q2QTCPListenerFactory(self)
+        self._q2qUDPListener = reactor.listenUDP(self.q2qPort.getHost().port, ptcp.Ptcp(self._publicUDPFactory))
+
         if uportnum is not None:
-            self.dispatcher = PTCPConnectionDispatcher()
+            self.dispatcher = PTCPConnectionDispatcher(self._publicUDPFactory)
+
 
     def startService(self):
         if self.q2qPortnum is not None:

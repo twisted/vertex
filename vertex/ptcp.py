@@ -428,6 +428,13 @@ class PtcpConnection(tcpdfa.TCP):
             self.input(tcpdfa.FIN, packet)
 
 
+    def getHost(self):
+        return self.transport.getHost()
+
+    def getPeer(self):
+        return self.peerAddressTuple
+
+
     _outgoingBytes = ''
     _nagle = None
 
@@ -649,6 +656,7 @@ class Ptcp(protocol.DatagramProtocol):
         return connID
 
     def sendPacket(self, packet):
+        # print 'Sending packet to', packet.destination, ':', packet
         self.transport.write(packet.encode(), packet.destination)
 
 
@@ -656,6 +664,8 @@ class Ptcp(protocol.DatagramProtocol):
     def startProtocol(self):
         self._lastConnID = 10 # random.randrange(2 ** 32)
         self._connections = {}
+
+        # print 'Started', self.factory, 'on', self.transport.getHost()
 
     def stopProtocol(self):
         for conn in self._connections:
@@ -668,6 +678,8 @@ class Ptcp(protocol.DatagramProtocol):
 
         pkt = PtcpPacket.decode(bytes, addr)
 
+        # print 'Packet received from', addr, ':', pkt
+        
         if pkt.dlen > len(pkt.data):
             self.sendPacket(
                 PtcpPacket.create(
