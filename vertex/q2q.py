@@ -1,4 +1,4 @@
-# -*- test-case-name: vertex.test.test_q2q -*-
+# -*- test-case-name: vertex.test.test_q2q.UDPConnection -*-
 # Copyright 2005 Divmod, Inc.  See LICENSE file for details
 
 # stdlib
@@ -20,7 +20,7 @@ from axiom.extime import Time
 from axiom.slotmachine import _structlike
 
 # vertex
-from vertex import sslverify, juice, subproducer
+from vertex import sslverify, juice, subproducer, ptcp
 from vertex import endpoint
 from vertex.conncache import ConnectionCache
 
@@ -694,7 +694,7 @@ class Q2Q(juice.Juice, subproducer.SuperProducer):
 
         if (self.service.getLocalFactories(q2qdst, q2qsrc, protocol)
             and srchost == self._determinePublicIP()):
-            self.service.dispatcher.seedNAT(udpdst, srcport)
+            self.service.dispatcher.seedNAT((udpdst, srcport))
             return dict()
         else:
             for (listener, listenCert, desc
@@ -1702,8 +1702,62 @@ class Q2QClientFactory(protocol.ClientFactory):
         p.wrapper = self.service.wrapper
         return p
 
+
+class _AddressDiscoveryProtocol(protocol.Protocol):
+    def __init__(self, addrDiscDef):
+        self.addrDiscDef = addrDiscDef
+
+    def _done(self, passthrough):
+        self.transport.loseConnection()
+        return passthrough
+
+    def connectionMade(self):
+        return self.transport.whoami().addBoth(
+            self._done).chainDeferred(
+            self.addrDiscDef)
+
+
+class _AddressDiscoveryFactory(protocol.ClientFactory):
+    def __init__(self, addressDiscoveredDeferred):
+        self.addressDiscoveredDeferred = addressDiscoveredDeferred
+
+    def buildProtocol(self, addr):
+        return _AddressDiscoveryProtocol(self.addressDiscoveredDeferred)
+
+
 def _noResults(*x):
     return []
+
+class PTCPConnectionDispatcher(object):
+    def __init__(self):
+        self._ports = {}
+
+    def seedNAT(self, (host, port)):
+        proto = ptcp.Ptcp('hello')
+        proto.peerAddressTuple = (host, port)
+        p = reactor.listenUDP(0, proto)
+        portNum = p.getHost().port
+        proto.sendPacket(ptcp.PtcpPacket.create(0, 0, 0, '', destination=(host, port)))
+        self._ports[portNum] = p
+        return portNum
+
+    def bindNewPort(self):
+        p = reactor.listenUDP(0, ptcp.Ptcp(10))
+        portNum = p.getHost().port
+        self._ports[portNum] = p
+        return portNum
+
+    def connectPTCP(self, host, port, factory):
+        proto = ptcp.Ptcp(5j)
+        p = reactor.listenUDP(0, proto)
+        self._ports[p.getHost().port] = p
+        return proto.connect(factory, host, port)
+
+    def iterconnections(self):
+        pass
+
+    def killAllConnections(self):
+        return defer.succeed(None)
 
 class Q2QService(service.MultiService, protocol.ServerFactory):
     # server factory stuff
@@ -1787,6 +1841,22 @@ class Q2QService(service.MultiService, protocol.ServerFactory):
         #XXX Should really live way off in cred-land
         return self.certificateStorage.checkUser(domain, username, privateSecret)
 
+    _publicUDPPort = None
+
+    def _retrieveRemoteCertificate(self, registrationServerAddress):
+        # Create a PTCP port, bounce some traffic off the indicated server,
+        # wait for it to tell us what our address is
+        self._publicUDPFactory = _PTCPQ2QFactory(self)
+        self._publicPTCPServer = ptcp.Ptcp(self._publicUDPFactory)
+        self._publicUDPPort = reactor.listenUDP(0, self._publicPTCPServer)
+
+        d = defer.Deferred()
+        addressDiscoveryFactory = _AddressDiscoveryFactory(d)
+        self._publicPTCPServer.connect(addressDiscoveryFactory,
+                                       *registrationServerAddress)
+        return d
+
+
     def listenQ2Q(self, fromAddress, protocolsToFactories, serverDescription):
         """
         Right now this is really only useful in the client implementation,
@@ -1813,8 +1883,22 @@ class Q2QService(service.MultiService, protocol.ServerFactory):
 
                 proto.notifyOnConnectionLost(shutdown)
                 return listenResult
-            return proto.listen(fromAddress, protocolsToFactories.keys(),
-                                serverDescription).addCallback(startup)
+
+            if self._publicUDPPort is None:
+                gp = proto.transport.getPeer()
+                udpAddress = (gp.host, gp.port)
+                pubUDPDeferred = self._retrievePublicUDPPortNumber(udpAddress)
+            else:
+                pubUDPDeferred = defer.succeed(None)
+
+            def _gotPubUDPPort(publicAddress):
+                self._publicUDPAddress = publicAddress
+                return proto.listen(fromAddress, protocolsToFactories.keys(),
+                                    serverDescription).addCallback(startup)
+
+            pubUDPDeferred.addCallback(_gotPubUDPPort)
+            return pubUDPDeferred
+
         D.addCallback(_secured)
         return D
 
@@ -1935,7 +2019,8 @@ class Q2QService(service.MultiService, protocol.ServerFactory):
                 Q2QTCPListenerFactory(self))
         if uportnum is None:
             uportnum = self.inboundUDPPortnum
-        assert uportnum is None
+        if uportnum is not None:
+            self.dispatcher = PTCPConnectionDispatcher()
 
     def startService(self):
         if self.q2qPortnum is not None:
