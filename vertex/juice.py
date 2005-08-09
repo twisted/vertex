@@ -1,5 +1,5 @@
-# Copyright 2005 Divmod, Inc.  See LICENSE file for details
 # -*- test-case-name: vertex.test.test_juice -*-
+# Copyright 2005 Divmod, Inc.  See LICENSE file for details
 
 __metaclass__ = type
 
@@ -109,6 +109,19 @@ class TLSBox(JuiceBox):
             proto.startTLS(self.certificate, self.verify)
         if self.sslstarted is not None:
             self.sslstarted()
+
+class SwitchBox(JuiceBox):
+    """
+    Switch to another protocol upon sending.
+    """
+
+    def __init__(self, __innerProto, **kw):
+        super(SwitchBox, self).__init__(**kw)
+        self.innerProto = __innerProto
+
+    def sendTo(self, proto):
+        super(SwitchBox, self).sendTo(proto)
+        proto.switchTo(innerProto)
 
 class QuitBox(JuiceBox):
     def sendTo(self, proto):
@@ -633,6 +646,30 @@ class Command:
             d[name] = extraArg.fromTransport(transport)
         return d
 
+class ProtocolSwitchCommand(Command):
+    """Use this command to switch from something Juice-derived to a different
+    protocol mid-connection.  This can be useful to use juice as the
+    connection-startup negotiation phase.  Since TLS is a different layer
+    entirely, you can use Juice to negotiate the security parameters of your
+    connection, then switch to a different protocol, and the connection will
+    remain secured.
+    """
+
+    def __init__(self, __protoToSwitchTo, **kw):
+        self.protoToSwitchTo = __protoToSwitchTo
+        super(ProtocolSwitchCommand, self).__init__(**kw)
+
+    def do(self, proto, namespace=None):
+        d = super(ProtocolSwitchCommand, self).do(proto)
+        proto._lock()
+        def switchNow(ign):
+            proto.switchTo(self.protoToSwitchTo)
+            return ign
+        def die(ign):
+            proto.transport.loseConnection()
+            return ign
+        return d.addCallback(switchNow).addErrback(die)
+
 class Negotiate(Command):
     commandName = 'Negotiate'
 
@@ -686,12 +723,46 @@ class Juice(LineReceiver, JuiceParserBase):
         JuiceParserBase.__init__(self)
         self._issueGreeting = issueGreeting
 
+    __locked = False
+
+    def _lock(self):
+        """ Lock this Juice instance so that no further Juice traffic may be sent.
+        This is used when sending a request to switch underlying protocols.
+        You probably want to subclass ProtocolSwitchCommand rather than calling
+        this directly.
+        """
+        self.__locked = True
+
+    innerProtocol = None
+
+    def switchTo(self, newProto):
+        """ Switch this Juice instance to a new protocol.  You need to do this
+        'simultaneously' on both ends of a connection; the easiest way to do
+        this is to use a subclass of ProtocolSwitchCommand on one side, and on
+        the other side call this method in the resposne to that command.
+
+        CAUTION: using Deferreds in conjunection with this method is possible
+        in principle but likely to be _highly confusing_.  Please do not do it
+        unless you are familiar with Juice's internals.
+        """
+
+        assert self.innerProtocol is None, "Protocol can only be safely switched once."
+        self.innerProtocol = newProto
+
+    def juiceBoxReceived(self, box):
+        if self.__locked and COMMAND in box and ASK in box:
+            # This is a command which will trigger an ansewr, and we can no
+            # longer answer anything, so don't bother delivering it.
+            return
+        return super(Juice, self).juiceBoxReceived(box)
+
     def sendPacket(self, completeBox):
         """
         Send a juice.Box to my peer.
 
         Note: transport.write is never called outside of this method.
         """
+        assert not self.__locked, "You cannot send juice packets when a connection is locked"
         self.transport.write(completeBox.serialize())
 
     def sendCommand(self, command, __content='', __answer=True, **kw):
@@ -704,7 +775,6 @@ class Juice(LineReceiver, JuiceParserBase):
     def makeConnection(self, transport):
         self._outstandingRequests = {}
         self._requestBuffer = []
-        self._notifyOnDisconnect = []
         self._sslVerifyProblems = ()
         # ^ Later this will become a mutable list - we can't get the handle
         # during connection shutdown thanks to the fact that Twisted destroys
@@ -756,15 +826,6 @@ class Juice(LineReceiver, JuiceParserBase):
         else:
             failReason = reason
         self.failAllOutgoing(failReason)
-        for f in self._notifyOnDisconnect:
-            try:
-                f()
-            except:
-                log.err()
-        del self._notifyOnDisconnect
-
-    def notifyOnDisconnect(self, f):
-        self._notifyOnDisconnect.append(f)
 
     def lineReceived(self, line):
         if line:
@@ -780,8 +841,14 @@ class Juice(LineReceiver, JuiceParserBase):
                 self.setRawMode()
             else:
                 self.juiceBoxReceived(b)
+                if self.innerProtocol is not None:
+                    self.innerProtocol.makeConnection(self.transport)
+                    self.setRawMode()
 
     def rawDataReceived(self, data):
+        if self.innerProtocol is not None:
+            self.innerProtocol.dataReceived(data)
+            return
         self._bodyRemaining -= len(data)
         if self._bodyRemaining <= 0:
             if self._bodyRemaining < 0:
@@ -794,7 +861,11 @@ class Juice(LineReceiver, JuiceParserBase):
             self._bodyBuffer = None
             b, self._pendingBox = self._pendingBox, None
             self.juiceBoxReceived(b)
-            self.setLineMode(extraData)
+            if self.innerProtocol is not None:
+                self.innerProtocol.makeConnection(self.transport)
+                self.innerProtocol.dataReceived(extraData)
+            else:
+                self.setLineMode(extraData)
         else:
             self._bodyBuffer.append(data)
 
