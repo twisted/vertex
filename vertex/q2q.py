@@ -1,4 +1,4 @@
-# -*- test-case-name: vertex.test.test_q2q -*-
+# -*- test-case-name: vertex.test.test_q2q.UDPConnection.testChooserGetsThreeChoices -*-
 # Copyright 2005 Divmod, Inc.  See LICENSE file for details
 
 # stdlib
@@ -266,11 +266,111 @@ class VirtualMethod:
 
 from twisted.internet import protocol
 
+class Q2QClientProtocolFactoryWrapper:
+
+    def __init__(self, cpf, fromAddress, toAddress, protocolName,
+                 connectionEstablishedDeferred):
+        self.cpf = cpf
+        self.fromAddress = fromAddress
+        self.toAddress = toAddress
+        self.protocolName = protocolName
+        self.connectionEstablishedDeferred = connectionEstablishedDeferred
+
+
+    def buildProtocol(self, addr):
+        # xxx modify addr to include q2q information.
+        subProto = self.cpf.buildProtocol(self.toAddress)
+        myProto = SeparateConnectionTransport(subProto, self.fromAddress,
+                                              self.toAddress, self.protocolName,
+                                              self.connectionEstablishedDeferred)
+        return myProto
+
+    def clientConnectionFailed(self, connector, reason):
+        self.cpf.clientConnectionFailed(connector, reason)
+        self.connectionEstablishedDeferred.errback(reason)
+
+    def clientConnectionLost(self, connector, reason):
+        self.cpf.clientConnectionLost(connector, reason)
+
+    def doStart(self):
+        self.cpf.doStart()
+
+    def doStop(self):
+        self.cpf.doStop()
+
+class AbstractConnectionAttempt:
+
+
+    def __init__(self, method, q2qproto, connectionID, fromAddress, toAddress,
+                 protocolName, clientProtocolFactory, localudp, issueGreeting=False):
+        self.method = method
+        self.q2qproto = q2qproto
+        self.connectionID = connectionID
+        self.q2qproto = q2qproto
+        self.fromAddress = fromAddress
+        self.toAddress = toAddress
+        self.protocolName = protocolName
+        self.deferred = defer.Deferred()
+        self.clientProtocolFactory = Q2QClientProtocolFactoryWrapper(
+            clientProtocolFactory, fromAddress, toAddress, protocolName,
+            self.deferred)
+        self.localudp = localudp
+        self.issueGreeting = issueGreeting
+
+
+    def startAttempt(self):
+        """
+        +-+
+        |?|
+        +-+
+        """
+        raise NotImplementedError()
+
+
+    q2qb = None
+    def buildProtocol(self, addr):
+        if self.cancelled:
+            return None
+        assert self.q2qb is None
+        self.q2qb = Q2QBootstrap(self.issueGreeting,
+                                 self.connectionID,
+                                 self.clientProtocolFactory)
+        return self.q2qb
+
+    def clientConnectionFailed(self, connector, reason):
+        self.clientProtocolFactory.clientConnectionFailed(connector, reason)
+
+    def clientConnectionLost(self, connector, reason):
+        """
+        """
+        # we don't care - this will be handled by Q2QBootstrap.
+
+    def cancel(self):
+        """
+        - Stop attempting to connect.
+
+        - If a connection is somehow made after this has been cancelled, reject
+          it.
+
+        - Clean up any resources, such as listening UDP or TCP ports,
+          associated with this connection attempt [obviously, that are unshared
+          by other connection attempt]
+
+        """
+        self.cancelled = True
+
+
+class TCPConnectionAttempt(AbstractConnectionAttempt):
+    def startAttempt(self):
+        reactor.connectTCP(self.method.host, self.method.port, self)
+        return self.deferred
+
 class TCPMethod:
     def __init__(self, hostport):
         self.host, port = hostport.split(':')
         self.port = int(port)
 
+    attemptFactory = TCPConnectionAttempt
     relayable = True
     ptype = 'tcp'
 
@@ -280,24 +380,77 @@ class TCPMethod:
     def __repr__(self):
         return '<%s>'%self.toString()
 
-    def doHostPortConnect(self, q2qproto, host, port, f):
-        reactor.connectTCP(host, port, f)
+    def attempt(self, *a):
+        return [self.attemptFactory(self, *a)]
 
-    def attemptConnect(self, q2qproto, connectionID, From, to,
-                       protocolName, protocolFactory, localudp):
-        cidcf = Q2QTCPConnector(q2qproto.service, connectionID, From, to,
-                                protocolFactory)
-        self.doHostPortConnect(q2qproto, self.host, self.port, cidcf)
-        return cidcf.deferred
 
+class _PTCPConnectionAttempt1NoPress(AbstractConnectionAttempt):
+    def startAttempt(self):
+        svc = self.q2qproto.service
+        dsp = svc.dispatcher
+        dsp.connectPTCP(
+            self.host, self.port, self,
+            svc.sharedUDPPortnum)
+        return self.deferred
+
+class _PTCPConnectionAttemptPress(AbstractConnectionAttempt):
+    def startAttempt(self):
+        svc = self.q2qproto.service
+        dsp = svc.dispatcher
+        newPort = self.newPort = dsp.bindNewPort()
+        dsp.connectPTCP(
+            self.host, self.port, self,
+            newPort)
+
+        return self.deferred
+
+    def cancel(self):
+        AbstractConnectionAttempt.cancel(self)
+        self.q2qproto.service.dispatcher.unbindPort(self.newPort)
 
 class PTCPMethod(TCPMethod):
     """Pseudo-TCP method.
     """
     ptype = 'ptcp'
 
-    def doHostPortConnect(self, q2qproto, host, port, f):
-        q2qproto.service.dispatcher.connectPTCP(host, port, f)
+    def attempt(self, *a):
+        return [_PTCPConnectionAttempt1NoPress(self, *a),
+                _PTCPConnectionAttemptPress(self, *a)]
+
+class RPTCPConnectionAttempt(AbstractConnectionAttempt):
+    def startAttempt(self):
+        realLocalUDP = self.newPort = self.q2qproto.service.dispatcher.seedNAT((self.host, self.port))
+        # self.host and self.port are remote host and port
+        # realLocalUDP is a local port
+
+        # The arguments here are given from the perspective of the recipient of
+        # the command. we are asking the recipient of the connection to map a
+        # NAT entry of a pre-existing listening UDP socket on their end of the
+        # connection by sending us some traffic.  therefore the src is their
+        # endpoint, the dst is our endpoint, the user we are asking them to
+        # send TO is us, the user we are asking them to accept this FROM is us.
+
+        # we include protocol as an arg because this is helpful for relaying.
+
+        def enbinden(boundereded):
+            self.q2qproto.service.dispatcher.connectPTCP(
+                self.host, self.port, self, realLocalUDP
+            )
+            return self.deferred
+
+        return BindUDP(
+            q2qsrc=self.toAddress,
+            q2qdst=self.fromAddress,
+            protocol=self.protocolName,
+            udpsrc=(self.host, self.port),
+            udpdst=(self.q2qproto._determinePublicIP(), realLocalUDP)
+            ).do(self.q2qproto).addCallback(enbinden)
+
+    def cancel(self):
+        AbstractConnectionAttempt.cancel(self)
+        self.q2qproto.service.dispatcher.unbindPort(self.newPort)
+
+
 
 
 class RPTCPMethod(TCPMethod):
@@ -312,34 +465,7 @@ class RPTCPMethod(TCPMethod):
     """
 
     ptype = 'rptcp'
-
-    def attemptConnect(self, q2qproto, connectionID, From, to, protocolName,
-                       protocolFactory, localudp):
-        realLocalUDP = q2qproto.service.dispatcher.seedNAT((self.host, self.port))
-        # self.host and self.port are remote host and port
-        # realLocalUDP is a local port
-
-        # The arguments here are given from the perspective of the recipient of
-        # the command. we are asking the recipient of the connection to map a
-        # NAT entry of a pre-existing listening UDP socket on their end of the
-        # connection by sending us some traffic.  therefore the src is their
-        # endpoint, the dst is our endpoint, the user we are asking them to
-        # send TO is us, the user we are asking them to accept this FROM is us.
-
-        # we include protocol as an arg because this is helpful for relaying.
-
-        cidcf = Q2QTCPConnector(q2qproto.service, connectionID, From, to,
-                                protocolFactory)
-        return BindUDP(
-            q2qsrc=to,
-            q2qdst=From,
-            protocol=protocolName,
-            udpsrc=(self.host, self.port),
-            udpdst=(q2qproto._determinePublicIP(), realLocalUDP)
-            ).do(q2qproto).addCallback(lambda bound:
-                                       q2qproto.service.dispatcher.connectPTCP(
-                self.host, self.port, cidcf))
-
+    attemptFactory = RPTCPConnectionAttempt
 
 
 class UnknownMethod:
@@ -694,7 +820,7 @@ class Q2Q(juice.Juice, subproducer.SuperProducer):
 
         if (self.service.getLocalFactories(q2qdst, q2qsrc, protocol)
             and srchost == self._determinePublicIP()):
-            self.service.dispatcher.seedNAT((udpdst, srcport))
+            self.service.dispatcher.seedNAT(udpdst, srcport)
             return dict()
         else:
             for (listener, listenCert, desc
@@ -899,6 +1025,8 @@ class Q2Q(juice.Juice, subproducer.SuperProducer):
         """
         # Verify stuff!
 
+        print 'handling an inbound', From, to, udp_source
+
         self.verifyCertificateAllowed(to, From)
 
         # 2-tuples of factory, description
@@ -920,7 +1048,9 @@ class Q2Q(juice.Juice, subproducer.SuperProducer):
                             '%s:%d' %
                             (privateIP, tcpPort)))
 
-            if udp_source is None:
+            if not self.service.udpEnabled:
+                log.msg("udp not enabled -- but I so want to send udp traffic!")
+            elif udp_source is None:
                 log.msg("udp_source was none on inbound")
             else:
                 if self.service.dispatcher is None:
@@ -928,7 +1058,10 @@ class Q2Q(juice.Juice, subproducer.SuperProducer):
                             udp_source)
                 else:
                     remoteUDPHost, remoteUDPPort = udp_source
-                    udpPort = self.service.dispatcher.seedNAT(udp_source)
+
+                    # Seed my NAT from my shared UDP port
+                    udpPort = self.service.dispatcher.seedNAT(udp_source, self.service.sharedUDPPortnum)
+
                     if remoteUDPHost == publicIP and publicIP != privateIP:
                         log.msg(
                             "Remote IP matches local, public IP %r;"
@@ -937,7 +1070,15 @@ class Q2Q(juice.Juice, subproducer.SuperProducer):
                             PTCPMethod("%s:%d" % (privateIP, udpPort)))
                     localMethods.append(
                         PTCPMethod("%s:%d" % (publicIP, udpPort)))
-                    udpxPort = self.service.dispatcher.bindNewPort()
+
+                    # XXX CLEANUP!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+                    # !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+                    # !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+                    privateUDPPort = self.service.dispatcher.seedNAT(udp_source)
+                    localMethods.append(
+                        PTCPMethod('%s:%d' % (publicIP, privateUDPPort)))
+
+                    udpxPort = self.service.dispatcher.seedNAT(udp_source)
                     localMethods.append(
                         RPTCPMethod("%s:%d" % (publicIP, udpxPort)))
 
@@ -954,6 +1095,8 @@ class Q2Q(juice.Juice, subproducer.SuperProducer):
 
         # We've looked for our local factory.  Let's see if we have any
         # listening protocols elsewhere.
+
+        print 'found methods:', localMethods
 
         key = (to, protocol)
         if key in self.service.listeningClients:
@@ -1212,25 +1355,31 @@ class Q2Q(juice.Juice, subproducer.SuperProducer):
 
     # Client/Support methods.
 
-    def _attemptSingleConnect(self, method, *args, **kw):
-        # return method.attemptConnect(self, *args, **kw)
-        log.msg('Attempting connection method %s ...' % (method,))
-        def _done(x, message):
-            log.msg("Connection attempt to %s %s: %s" % (method, message, x))
-            return x
-        return method.attemptConnect(self, *args, **kw).addCallback(
-            _done, 'succeeded').addErrback(
-            _done, 'failed')
-
     def attemptConnectionMethods(self, methods, connectionID, From, to,
                                  protocolName, protocolFactory,
                                  localudp):
         wrapperFactory = IgnoreConnectionFailed(protocolFactory)
-        return _endeferify([(self._attemptSingleConnect,
-                             (method, connectionID,  From, to,
-                              protocolName, wrapperFactory,
-                              localudp), {})
-                            for method in methods])
+
+        def oneAttemptSucceeded((result, index)):
+            # XXX Cancel outstanding attempts, maybe.  They'll fail anyway,
+            # because the factory will return None from buildProtocol().
+            for n, att in enumerate(attemptObjects):
+                if n != index:
+                    att.cancel()
+            return result
+
+        attemptObjects = []
+        for meth in methods:
+            atts = meth.attempt(self, connectionID, From, to,
+                                protocolName, protocolFactory,
+                                localudp)
+            attemptObjects.extend(atts)
+
+        attemptDeferreds = [att.deferred for att in attemptObjects]
+
+        d = defer.DeferredList(attemptDeferreds, fireOnOneCallback=True)
+        d.addCallback(oneAttemptSucceeded)
+        return d
 
     def listen(self, fromAddress, protocols, serverDescription):
         return Listen(From=fromAddress,
@@ -1252,6 +1401,7 @@ class Q2Q(juice.Juice, subproducer.SuperProducer):
         connected, or fails with AttemptsFailed if the connection was not
         possible.
         """
+        print 'attempting a connection', From, to
 
         publicIP = self._determinePublicIP()
 
@@ -1260,11 +1410,11 @@ class Q2Q(juice.Juice, subproducer.SuperProducer):
                  Protocol=protocolName)
 
         if self.service.dispatcher is not None:
-            mypeer = self.transport.getPeer()
-            localudp = self.service.dispatcher.seedNAT(
-                (mypeer.host, mypeer.port+17)) # don't run anything there...
-            A['udp_source'] = (publicIP, localudp)
+            # tell them exactly where they can shove it
+            A['udp_source'] = (publicIP,
+                               self.service.sharedUDPPortnum)
         else:
+            # don't tell them because we don't know
             log.msg("dispatcher unavailable when connecting")
             localudp = None
 
@@ -1365,6 +1515,19 @@ class Q2QLayeringMixin:
         if self.subProtocol is not None:
             return self.subProtocol.connectionLost(reason)
 
+class SeparateConnectionTransport(Q2QLayeringMixin):
+    def __init__(self, subProtocol, q2qhost, q2qpeer, protocolName,
+                 connectionEstablishedDeferred):
+        self.subProtocol = subProtocol
+        self.q2qhost = q2qhost
+        self.q2qpeer = q2qpeer
+        self.protocolName = protocolName
+        self.connectionEstablishedDeferred = connectionEstablishedDeferred
+
+    def makeConnection(self, tpt):
+        Q2QLayeringMixin.makeConnection(self, tpt)
+        self.connectionEstablishedDeferred.callback(self)
+
 class Q2QTCPConnector(Q2QLayeringMixin, protocol.ClientFactory, protocol.Protocol):
     """
     I am an implementor of IClientFactory that can hook up a ClientFactory to a
@@ -1399,6 +1562,69 @@ class Q2QTCPConnector(Q2QLayeringMixin, protocol.ClientFactory, protocol.Protoco
         self.protocolFactory.clientConnectionFailed(connector, reason)
         self.deferred.errback(reason)
 
+class WhoAmI(juice.Command):
+    commandName = 'Who-Am-I'
+
+    response = [
+        ('address', HostPort()),
+        ]
+
+class RetrieveConnection(juice.ProtocolSwitchCommand):
+    commandName = 'Retrieve-Connection'
+
+    arguments = [
+        ('identifier', juice.String()),
+        ]
+
+class Q2QBootstrap(juice.Juice):
+    def __init__(self, issueGreeting, connIdentifier=None, protoFactory=None):
+        juice.Juice.__init__(self, issueGreeting)
+        self.connIdentifier = connIdentifier
+        self.protoFactory = protoFactory
+
+    def connectionMade(self):
+        if self.connIdentifier is not None:
+            self.retrieveConnection(self.connIdentifier, self.protoFactory)
+
+    def connectionLost(self, reason):
+        juice.Juice.connectionLost(self, reason)
+        if self.protocolFactory is not None:
+            if self.innerProtocol is not None:
+                # XXX TODO: MUST IMPLEMENT ICONNECTOR
+                self.clientConnectionLost(self, reason)
+            else:
+                self.clientConnectionFailed(self, reason)
+
+    def whoami(self):
+        """Return a Deferred which fires with a 2-tuple of (dotted quad ip, port
+        number).
+        """
+        def cbWhoAmI(result):
+            return result['address']
+        return WhoAmI().do(self).addCallback(cbWhoAmI)
+
+
+    def command_WHO_AM_I(self):
+        peer = self.transport.getPeer()
+        return {
+            'address': (peer.host, peer.port),
+            }
+    command_WHO_AM_I.command = WhoAmI
+
+
+    def retrieveConnection(self, identifier, factory):
+        return RetrieveConnection(factory, identifier=identifier).do(self)
+
+
+    def command_RETRIEVE_CONNECTION(self, identifier):
+        proto, self.q2qhost, self.q2qpeer = self.service.protocolAndAuthFromId(identifier, self)
+        if proto is None:
+            self.transport.loseConnection()
+        else:
+            self.switchTo(proto)
+            return {}
+    command_RETRIEVE_CONNECTION.command = RetrieveConnection
+
 
 class Q2QTCPListener(Q2QLayeringMixin, protocol.Protocol):
     buf = ''
@@ -1425,12 +1651,12 @@ class Q2QTCPListener(Q2QLayeringMixin, protocol.Protocol):
         else:
             return Q2QLayeringMixin.dataReceived(self, data)
 
-class Q2QTCPListenerFactory(protocol.Factory):
+class Q2QBootstrapFactory(protocol.Factory):
     def __init__(self, service):
         self.service = service
 
     def buildProtocol(self, addr):
-        q2etc = Q2QTCPListener()
+        q2etc = Q2QBootstrap(False)
         q2etc.service = self.service
         return q2etc
 
@@ -1703,21 +1929,28 @@ class Q2QClientFactory(protocol.ClientFactory):
         return p
 
 
-class _AddressDiscoveryProtocol(protocol.Protocol):
+class YourAddress(juice.Command):
+    arguments = [
+        ('address', HostPort()),
+        ]
+
+
+class AddressDiscoveryProtocol(juice.Juice):
     def __init__(self, addrDiscDef):
         self.addrDiscDef = addrDiscDef
 
-    def _done(self, passthrough):
-        # print 'awesome', passthrough
-        self.transport.loseConnection()
-        return passthrough
-
     def connectionMade(self):
-        # print 'woo conn'
-        return self.transport.whoami().addBoth(
-            self._done).chainDeferred(
-            self.addrDiscDef)
+        pass
 
+    def command_YOUR_ADDRESS(self, address):
+        self.addrDiscDef.callback(address)
+        self.addrDiscDef = None
+        self.transport.loseConnection()
+    command_YOUR_ADDRESS.command = YourAddress
+
+    def connectionLost(self, reason):
+        if self.addrDiscDef is not None:
+            self.addrDiscDef.errback(reason)
 
 class _AddressDiscoveryFactory(protocol.ClientFactory):
     def __init__(self, addressDiscoveredDeferred):
@@ -1725,7 +1958,7 @@ class _AddressDiscoveryFactory(protocol.ClientFactory):
 
     def buildProtocol(self, addr):
         # print 'sweet'
-        return _AddressDiscoveryProtocol(self.addressDiscoveredDeferred)
+        return AddressDiscoveryProtocol(self.addressDiscoveredDeferred)
 
 
 def _noResults(*x):
@@ -1736,20 +1969,32 @@ class PTCPConnectionDispatcher(object):
         self.factory = factory
         self._ports = {}
 
-    def seedNAT(self, (host, port)):
-        proto = ptcp.Ptcp(self.factory)
-        proto.peerAddressTuple = (host, port)
-        p = reactor.listenUDP(0, proto)
-        portNum = p.getHost().port
+    def seedNAT(self, (host, port), sourcePort=0):
+        if sourcePort not in self._ports:
+            assert sourcePort == 0
+            proto = ptcp.Ptcp(self.factory)
+            proto.peerAddressTuple = (host, port)
+            p = reactor.listenUDP(sourcePort, proto)
+            portNum = p.getHost().port
+            self._ports[portNum] = (p, proto)
+        else:
+            assert sourcePort != 0
+            p, proto = self._ports[sourcePort]
         proto.sendPacket(ptcp.PtcpPacket.create(0, 0, 0, '', destination=(host, port)))
-        self._ports[portNum] = p
         return portNum
 
-    def bindNewPort(self):
-        p = reactor.listenUDP(0, ptcp.Ptcp(self.factory))
+    def bindNewPort(self, portNum=0):
+        proto = ptcp.Ptcp(self.factory)
+        p = reactor.listenUDP(portNum, proto)
         portNum = p.getHost().port
-        self._ports[portNum] = p
+        self._ports[portNum] = (p, proto)
         return portNum
+
+    def unbindPort(self, portNum):
+        port, proto = self._ports[portNum]
+        proto._stopRetransmitting()
+        port.stopListening()
+        del self._ports[portNum]
 
     def connectPTCP(self, host, port, factory):
         proto = ptcp.Ptcp(self.factory)
@@ -1764,7 +2009,7 @@ class PTCPConnectionDispatcher(object):
 
     def killAllConnections(self):
         dl = []
-        for p in self._ports.itervalues():
+        for p, proto in self._ports.itervalues():
             for c in p.protocol._connections.itervalues():
                 c._stopRetransmitting()
             dl.append(defer.maybeDeferred(p.stopListening))
@@ -1799,7 +2044,6 @@ class Q2QService(service.MultiService, protocol.ServerFactory):
                  certificateStorage=None, wrapper=None,
                  q2qPortnum=port,
                  inboundTCPPortnum=None,
-                 inboundUDPPortnum=None,
                  publicIP=None):
         """
 
@@ -1831,9 +2075,6 @@ class Q2QService(service.MultiService, protocol.ServerFactory):
         # port number for inbound almost-raw TCP
         self.inboundTCPPortnum = inboundTCPPortnum
 
-        # port number for inbound gin
-        self.inboundUDPPortnum = inboundUDPPortnum
-
         # list of independent TCP connections relaying Q2Q traffic.
         self.tcpConnections = []
 
@@ -1859,7 +2100,7 @@ class Q2QService(service.MultiService, protocol.ServerFactory):
     def _retrievePublicUDPPortNumber(self, registrationServerAddress):
         # Create a PTCP port, bounce some traffic off the indicated server,
         # wait for it to tell us what our address is
-        self._publicPTCPServer = ptcp.Ptcp(self._publicUDPFactory)
+        self._publicPTCPServer = ptcp.Ptcp(self._bootstrapFactory)
         self._publicUDPPort = reactor.listenUDP(0, self._publicPTCPServer)
 
         # print 'HELlO'
@@ -2024,31 +2265,32 @@ class Q2QService(service.MultiService, protocol.ServerFactory):
     inboundTCPPort = None
     inboundUDPPort = None
     dispatcher = None
+    sharedUDPPortnum = None
 
-
-    def startInboundListener(self, portnum=None, uportnum=None):
-        assert self.inboundTCPPort is None
-        if portnum is None:
-            portnum = self.inboundTCPPortnum
-        if portnum is not None:
-            self.inboundTCPPort = reactor.listenTCP(
-                portnum,
-                Q2QTCPListenerFactory(self))
-        if uportnum is None:
-            uportnum = self.inboundUDPPortnum
-
-        self._publicUDPFactory = Q2QTCPListenerFactory(self)
-        self._q2qUDPListener = reactor.listenUDP(self.q2qPort.getHost().port, ptcp.Ptcp(self._publicUDPFactory))
-
-        if uportnum is not None:
-            self.dispatcher = PTCPConnectionDispatcher(self._publicUDPFactory)
-
+    udpEnabled = True           # pretty much you never want to turn this off
+                                # except in the unit tests, or in some kind of
+                                # pathological network condition
 
     def startService(self):
+        self._bootstrapFactory = Q2QBootstrapFactory(self)
+        if self.udpEnabled:
+            self.dispatcher = PTCPConnectionDispatcher(self._bootstrapFactory)
+
         if self.q2qPortnum is not None:
             self.q2qPort = reactor.listenTCP(
                 self.q2qPortnum, self)
-        self.startInboundListener()
+            self.q2qPortnum = self.q2qPort.getHost().port
+            if self.dispatcher is not None:
+                self.sharedUDPPortnum = self.dispatcher.bindNewPort(self.q2qPortnum)
+
+        if self.inboundTCPPortnum is not None:
+            self.inboundTCPPort = reactor.listenTCP(
+                self.inboundTCPPortnum,
+                self._bootstrapFactory)
+
+        if self.sharedUDPPortnum is None and self.dispatcher is not None:
+            self.sharedUDPPortnum = self.dispatcher.bindNewPort()
+
         return service.MultiService.startService(self)
 
     def stopService(self):

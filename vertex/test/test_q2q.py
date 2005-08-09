@@ -273,12 +273,11 @@ class Q2QConnectionTestCase(unittest.TestCase):
 
     userReverseDNS = 'i.watch.too.much.tv'
     inboundTCPPortnum = 0
-    inboundUDPPortnum = 0
+    udpEnabled = False
 
     def _makeQ2QService(self, certificateEntity, pff=None):
         svc = q2q.Q2QService(pff, q2qPortnum=0,
-                             inboundTCPPortnum=self.inboundTCPPortnum,
-                             inboundUDPPortnum=self.inboundUDPPortnum)
+                             inboundTCPPortnum=self.inboundTCPPortnum)
         if '@' not in certificateEntity:
             svc.certificateStorage.addPrivateCertificate(certificateEntity)
         return svc
@@ -584,7 +583,7 @@ class ConnectionTestMixin:
 
 class VirtualConnection(Q2QConnectionTestCase, ConnectionTestMixin):
     inboundTCPPortnum = None
-    inboundUDPPortnum = None
+    udpEnabled = False
 
     def testListening(self):
         pass
@@ -596,12 +595,13 @@ class VirtualConnection(Q2QConnectionTestCase, ConnectionTestMixin):
     testChooserGetsThreeChoices.skip = 'cant do this without testListening'
 
 class UDPConnection(Q2QConnectionTestCase, ConnectionTestMixin):
+    # skip = 'yep'
     inboundTCPPortnum = None
-    inboundUDPPortnum = 0
+    udpEnabled = True
 
 class TCPConnection(Q2QConnectionTestCase, ConnectionTestMixin):
     inboundTCPPortnum = 0
-    inboundUDPPortnum = None
+    udpEnabled = False
 
 class TestProtocol(juice.Juice):
     def juice_GETADDRESSINFO(self, request):

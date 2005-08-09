@@ -13,7 +13,7 @@ from vertex.statemachine import StateError
 _packetFormat = '!4LBlH'
 _fixedSize = struct.calcsize(_packetFormat)
 
-_SYN, _ACK, _FIN, _RST, _NAT, _STB = [1 << n for n in range(6)]
+_SYN, _ACK, _FIN, _RST, _STB = [1 << n for n in range(5)]
 
 def _flagprop(flag):
     def setter(self, value):
@@ -21,7 +21,7 @@ def _flagprop(flag):
             self.flags |= flag
         else:
             self.flags &= ~flag
-    return property(lambda self: self.flags & flag, setter)
+    return property(lambda self: bool(self.flags & flag), setter)
 
 def relativeSequence(wireSequence, initialSequence, lapNumber):
     """ Compute a relative sequence number from a wire sequence number so that we
@@ -52,7 +52,6 @@ class PtcpPacket(util.FancyStrMixin, object):
     ack = _flagprop(_ACK)
     fin = _flagprop(_FIN)
     rst = _flagprop(_RST)
-    nat = _flagprop(_NAT)
     stb = _flagprop(_STB)
 
     def shortdata():
@@ -69,7 +68,7 @@ class PtcpPacket(util.FancyStrMixin, object):
             res = []
             for (f, v) in [
                 (self.syn, 'S'), (self.ack, 'A'), (self.fin, 'F'),
-                (self.rst, 'R'), (self.nat, 'N'), (self.stb, 'T')]:
+                (self.rst, 'R'), (self.stb, 'T')]:
                 res.append(f and v or '.')
             return ''.join(res)
         return get,
@@ -78,14 +77,13 @@ class PtcpPacket(util.FancyStrMixin, object):
     def create(cls, connID, seqNum, ackNum, data,
                   window=(1 << 15),
                   syn=False, ack=False, fin=False,
-                  rst=False, nat=False, stb=False,
+                  rst=False, stb=False,
                   destination=None):
         i = cls(connID, seqNum, ackNum, window,
                 0, 0, len(data), data)
         i.syn = syn
         i.ack = ack
         i.fin = fin
-        i.nat = nat
         i.rst = rst
         i.stb = stb
         i.checksum = i.computeChecksum()
@@ -338,19 +336,6 @@ class PtcpConnection(tcpdfa.TCP):
             self.retransmissionQueue = rq
             return
 
-        if packet.nat:
-            if packet.syn:
-                # Send them stuff about their address
-                self.originate(ack=True, nat=True,
-                               data=('%s %d' % packet.peerAddressTuple))
-            elif packet.ack:
-                # Parse stuff about our address
-                addr = packet.data.split(None, 1)
-                host, port = addr[0], int(addr[1])
-                self._gotAddress(host, port)
-            return
-
-
         # XXX TODO: examine 'window' field and adjust sendWindowRemaining
         # is it 'occupying a portion of valid receive sequence space'?  I think
         # this means 'packet which might acceptably contain useful data'
@@ -543,13 +528,17 @@ class PtcpConnection(tcpdfa.TCP):
         if not self._outgoingBytes:
             self._writeBufferEmpty()
 
-    def originate(self, data='', syn=False, ack=False, fin=False, nat=False):
+    def enter_CLOSE_WAIT(self, packet):
+        # print 'Packet that sent us to CLOSE_WAIT:', packet
+        pass
+
+    def originate(self, data='', syn=False, ack=False, fin=False):
         p = PtcpPacket.create(self.connID,
                               seqNum=(self.nextSendSeqNum + self.hostSendISN) % (2**32),
                               ackNum=(self.nextRecvSeqNum + self.peerSendISN) % (2**32),
                               data=data,
                               window=self.recvWindow,
-                              syn=syn, ack=ack, fin=fin, nat=nat,
+                              syn=syn, ack=ack, fin=fin,
                               destination=self.peerAddressTuple)
         # do we want to enqueue this packet for retransmission?
         sl = p.segmentLength()
@@ -679,7 +668,7 @@ class Ptcp(protocol.DatagramProtocol):
         pkt = PtcpPacket.decode(bytes, addr)
 
         # print 'Packet received from', addr, ':', pkt
-        
+
         if pkt.dlen > len(pkt.data):
             self.sendPacket(
                 PtcpPacket.create(
