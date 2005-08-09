@@ -8,7 +8,7 @@ from twisted.python.failure import Failure
 
 from twisted.trial import unittest
 
-from vertex.q2q import NoSuchUser, Q2QAddress
+from vertex.q2q import Q2QAddress
 from vertex import sigma
 
 from vertex.test.test_juice import IOPump
@@ -93,7 +93,7 @@ class FakeQ2QService:
         listener, description = self.listeners.get((toAddress, protocolName))
         if listener is None:
             print 'void listener', fromAddress, toAddress, self.listeners, self.listener
-            reason = Failure(NoSuchUser())
+            reason = Failure(KeyError())
             protocolFactory.clientConnectionFailed(None, reason)
             return defer.fail(reason)
         else:
