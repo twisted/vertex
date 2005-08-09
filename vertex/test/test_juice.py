@@ -2,9 +2,22 @@
 
 
 from vertex import juice
+from vertex.test import utils
 from twisted.trial import unittest
 from twisted.internet import protocol, defer
 from cStringIO import StringIO
+
+def readAndDestroy(iodata):
+    try:
+        iodata.seek(0)
+        result = iodata.read()
+        iodata.seek(0)
+        iodata.truncate()
+    except ValueError:
+        print '<bug in FileTransport, early close>'
+        result = ''
+    return result
+
 
 class IOPump:
     """Utility to pump data between clients and servers for protocol testing.
@@ -39,29 +52,33 @@ class IOPump:
 
         Returns whether any data was moved.
         """
-        self.clientIO.seek(0)
-        self.serverIO.seek(0)
-        cData = self.clientIO.read()
-        sData = self.serverIO.read()
-        self.clientIO.seek(0)
-        self.serverIO.seek(0)
-        self.clientIO.truncate()
-        self.serverIO.truncate()
+        sData = readAndDestroy(self.serverIO)
+        cData = readAndDestroy(self.clientIO)
         self.client.transport._checkProducer()
         self.server.transport._checkProducer()
         if self.debug or debug:
             print '.'
             # XXX slightly buggy in the face of incremental output
             if cData:
-                for line in cData.split('\r\n')[:-1]:
+                for line in cData.split('\r\n'):
                     print 'C: '+line
             if sData:
-                for line in sData.split('\r\n')[:-1]:
+                for line in sData.split('\r\n'):
                     print 'S: '+line
         if cData:
             self.server.dataReceived(cData)
         if sData:
             self.client.dataReceived(sData)
+        if self.server.transport.disconnecting and not self.server.transport.disconnected:
+            if self.debug or debug:
+                print '* C'
+            self.server.transport.disconnected = True
+            self.client.connectionLost(None)
+        if self.client.transport.disconnecting and not self.client.transport.disconnected:
+            if self.debug or debug:
+                print '* S'
+            self.client.transport.disconnected = True
+            self.server.connectionLost(None)
         return bool(cData or sData)
 
 
@@ -76,6 +93,7 @@ class TestProto(protocol.Protocol):
 
     def dataReceived(self, bytes):
         self.data.append(bytes)
+        self.transport.loseConnection()
 
     def connectionLost(self, reason):
         self.onConnLost.callback(self.data)
@@ -127,6 +145,14 @@ class TestSwitchProto(juice.ProtocolSwitchCommand):
         ]
     errors = {UnknownProtocol: 'UNKNOWN'}
 
+class SingleUseFactory(protocol.ClientFactory):
+    def __init__(self, proto):
+        self.proto = proto
+
+    def buildProtocol(self, addr):
+        p, self.proto = self.proto, None
+        return p
+
 class SimpleSymmetricCommandProtocol(juice.Juice):
     def __init__(self, issueGreeting, onConnLost=None):
         juice.Juice.__init__(self, issueGreeting)
@@ -150,7 +176,7 @@ class SimpleSymmetricCommandProtocol(juice.Juice):
 
     def switchToTestProtocol(self):
         p = TestProto(self.onConnLost, SWITCH_CLIENT_DATA)
-        return TestSwitchProto(p, name='test-proto').do(self).addCallback(lambda ign: p)
+        return TestSwitchProto(SingleUseFactory(p), name='test-proto').do(self).addCallback(lambda ign: p)
 
     def command_SWITCH_PROTO(self, name):
         if name == 'test-proto':
@@ -165,8 +191,8 @@ class SSCF(SSPF, protocol.ClientFactory): pass
 
 def connectedServerAndClient(ServerClass=lambda: SimpleSymmetricProtocol(True),
                              ClientClass=lambda: SimpleSymmetricProtocol(False),
-                             clientTransportWrapper=protocol.FileWrapper,
-                             serverTransportWrapper=protocol.FileWrapper,
+                             clientTransportWrapper=utils.FileWrapper,
+                             serverTransportWrapper=utils.FileWrapper,
                              debug=False):
     """Returns a 3-tuple: (client, server, pump)
     """
@@ -302,6 +328,8 @@ class AppLevelTest(unittest.TestCase):
         self.assertEquals(s.protocolVersion, 1)
 
     def testProtocolSwitch(self):
+        self.testSucceeded = False
+
         serverDeferred = defer.Deferred()
         serverProto = SimpleSymmetricCommandProtocol(True, serverDeferred)
         clientDeferred = defer.Deferred()
@@ -316,9 +344,11 @@ class AppLevelTest(unittest.TestCase):
             self.failUnless(clientSuccess)
             self.assertEquals(''.join(serverData), SWITCH_CLIENT_DATA)
             self.assertEquals(''.join(clientData), SWITCH_SERVER_DATA)
+            self.testSucceeded = True
 
         def cbSwitch(proto):
             return defer.DeferredList([serverDeferred, clientDeferred]).addCallback(cbConnsLost)
 
         switchDeferred.addCallback(cbSwitch)
         p.flush()
+        self.failUnless(self.testSucceeded)

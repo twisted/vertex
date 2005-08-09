@@ -655,15 +655,16 @@ class ProtocolSwitchCommand(Command):
     remain secured.
     """
 
-    def __init__(self, __protoToSwitchTo, **kw):
-        self.protoToSwitchTo = __protoToSwitchTo
+    def __init__(self, __protoToSwitchToFactory, **kw):
+        self.protoToSwitchToFactory = __protoToSwitchToFactory
         super(ProtocolSwitchCommand, self).__init__(**kw)
 
     def do(self, proto, namespace=None):
         d = super(ProtocolSwitchCommand, self).do(proto)
         proto._lock()
         def switchNow(ign):
-            proto.switchTo(self.protoToSwitchTo)
+            innerProto = self.protoToSwitchToFactory.buildProtocol(proto.transport.getPeer())
+            proto.switchTo(innerProto)
             return ign
         def die(ign):
             proto.transport.loseConnection()
@@ -826,6 +827,8 @@ class Juice(LineReceiver, JuiceParserBase):
         else:
             failReason = reason
         self.failAllOutgoing(failReason)
+        if self.innerProtocol is not None:
+            self.innerProtocol.connectionLost(reason)
 
     def lineReceived(self, line):
         if line:
@@ -863,7 +866,8 @@ class Juice(LineReceiver, JuiceParserBase):
             self.juiceBoxReceived(b)
             if self.innerProtocol is not None:
                 self.innerProtocol.makeConnection(self.transport)
-                self.innerProtocol.dataReceived(extraData)
+                if extraData:
+                    self.innerProtocol.dataReceived(extraData)
             else:
                 self.setLineMode(extraData)
         else:

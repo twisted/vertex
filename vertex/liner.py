@@ -59,7 +59,8 @@ class LineReceiver(Protocol):
             self.buffer = ''
             if self.isDisconnecting():
                 return
-            self.rawDataReceived(buffer)
+            if buffer:
+                self.rawDataReceived(buffer)
         else:
             self.buffer = buffer
 
