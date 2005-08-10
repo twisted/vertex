@@ -397,8 +397,7 @@ class Q2QClientProgram(Options):
             if t is not None:
                 t = int(t)
             self.service = ClientQ2QService(self['certspath'],
-                                            inboundTCPPortnum=t,
-                                            inboundUDPPortnum=u)
+                                            inboundTCPPortnum=t)
         return self.service
 
     def getDefaultPath(self):

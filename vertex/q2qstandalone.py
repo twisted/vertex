@@ -79,7 +79,6 @@ class StandaloneQ2Q(DependencyService):
     def setup_Q2Q(self, path,
                   q2qPortnum=q2q.port,
                   inboundTCPPortnum=q2q.port+1,
-                  inboundUDPPortnum=q2q.port+2,
                   publicIP=None
                   ):
         """Set up a Q2Q service.
@@ -94,7 +93,6 @@ class StandaloneQ2Q(DependencyService):
                 certificateStorage=store,
                 q2qPortnum=q2qPortnum,
                 inboundTCPPortnum=inboundTCPPortnum,
-                inboundUDPPortnum=inboundUDPPortnum,
                 publicIP=publicIP,
                 ))
 

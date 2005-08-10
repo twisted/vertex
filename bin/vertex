@@ -1,0 +1,7 @@
+#!/usr/bin/python
+# Copyright 2005 Divmod, Inc.  See LICENSE file for details
+
+from vertex.q2qclient import Q2QClientProgram
+
+if __name__ == '__main__':
+    Q2QClientProgram().parseOptions()
