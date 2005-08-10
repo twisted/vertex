@@ -2,7 +2,7 @@
 
 import random, os
 
-from twisted.internet import reactor, protocol, defer
+from twisted.internet import reactor, protocol, defer, task
 from twisted.trial import unittest
 
 from vertex import ptcp
@@ -46,21 +46,31 @@ class TestProducerProtocol(protocol.Protocol):
 
     def __init__(self):
         self.onConnect = defer.Deferred()
+        self.onPaused = defer.Deferred()
 
     def connectionMade(self):
+        self.onConnect.callback(None)
         self.count = -1
         self.transport.registerProducer(self, False)
-        self.onConnect.callback(None)
+
+    def pauseProducing(self):
+        if self.onPaused is not None:
+            self.onPaused.callback(None)
+            self.onPaused = None
 
     def resumeProducing(self):
         self.count += 1
         if self.count < self.NUM_WRITES:
-            self.transport.write(chr(self.count) * self.WRITE_SIZE)
+            bytes = chr(self.count) * self.WRITE_SIZE
+            # print 'Issuing a write', len(bytes)
+            self.transport.write(bytes)
             if self.count == self.NUM_WRITES - 1:
                 # Last time through, intentionally drop the connection before
                 # the buffer is empty to ensure we handle this case properly.
+                # print 'Disconnecting'
                 self.transport.loseConnection()
         else:
+            # print 'Unregistering'
             self.transport.unregisterProducer()
 
 class PtcpTransportTestCase(unittest.TestCase):
@@ -172,7 +182,8 @@ class PtcpTransportTestCase(unittest.TestCase):
         def disconnected(ignored):
             self.assertEquals(
                 ''.join(clientProto.buffer),
-                ''.join([chr(n) * serverProto.WRITE_SIZE for n in range(serverProto.NUM_WRITES)]))
+                ''.join([chr(n) * serverProto.WRITE_SIZE
+                         for n in range(serverProto.NUM_WRITES)]))
 
         clientConnID = clientTransport.connect(cf, '127.0.0.1', serverPort.getHost().port)
         return clientProto.onDisconn.addCallback(disconnected)
@@ -199,6 +210,42 @@ class PtcpTransportTestCase(unittest.TestCase):
             reactor.callLater(2, resumeProducing)
             return clientProto.gotBytes(BYTES).addCallback(cbBytes)
 
+
+        clientConnID = clientTransport.connect(cf, '127.0.0.1', serverPort.getHost().port)
+        connD = defer.DeferredList([clientProto.onConnect, serverProto.onConnect])
+        connD.addCallback(cbConnect)
+        return connD
+
+    def testTransportProducerProtocolProducer(self):
+        (serverProto, clientProto,
+         sf, cf,
+         serverTransport, clientTransport,
+         serverPort, clientPort) = self.setUpForATest(
+            ServerProtocol=TestProducerProtocol)
+
+        paused = []
+        def cbPaused(ignored):
+            # print 'Paused'
+            paused.append(True)
+            clientProto.transport.resumeProducing()
+        serverProto.onPaused.addCallback(cbPaused)
+
+        def cbBytes(ignored):
+            # print 'Disconnected'
+            self.assertEquals(
+                ''.join(clientProto.buffer),
+                ''.join([chr(n) * serverProto.WRITE_SIZE
+                         for n in range(serverProto.NUM_WRITES)]))
+
+        def cbConnect(ignored):
+            # The server must write enough to completely fill the outgoing buffer,
+            # since our peer isn't ACKing /anything/ and our server waits for
+            # writes to be acked before proceeding.
+            serverProto.WRITE_SIZE = serverProto.transport.sendWindow * 2
+
+            # print 'Connected'
+            clientProto.transport.pauseProducing()
+            return clientProto.onDisconn.addCallback(cbBytes)
 
         clientConnID = clientTransport.connect(cf, '127.0.0.1', serverPort.getHost().port)
         connD = defer.DeferredList([clientProto.onConnect, serverProto.onConnect])

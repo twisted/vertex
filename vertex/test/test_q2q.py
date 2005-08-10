@@ -494,7 +494,7 @@ class ConnectionTestMixin:
             print 'PAUSING', liveConnection.transport, liveConnection
             liveConnection.transport.pauseProducing()
         wfc = self.dataEater.waitForCount(SIZE * 2)
-        self.assertRaises(defer.TimeoutError, util.wait, wfc, timeout=10)
+        self.assertRaises(defer.TimeoutError, util.wait, wfc, timeout=3)
         for liveConnection in self.serverService.iterconnections():
             print 'RESUMING', liveConnection.transport, liveConnection
             liveConnection.transport.resumeProducing()
@@ -562,6 +562,7 @@ class ConnectionTestMixin:
         def connected(proto):
             return EngenderError().do(proto)
         def exploded(err):
+            print 'lalala want conn done, got', err
             err.trap(ConnectionDone)
         d.addCallback(connected)
         d.addCallbacks(self.successIsFailure, exploded)

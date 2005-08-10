@@ -1,4 +1,4 @@
-# -*- test-case-name: vertex.test.test_q2q.TCPConnection -*-
+# -*- test-case-name: vertex.test.test_q2q.UDPConnection -*-
 # Copyright 2005 Divmod, Inc.  See LICENSE file for details
 
 # stdlib
@@ -847,10 +847,10 @@ class Q2Q(juice.Juice, subproducer.SuperProducer):
 
         for (listener, listenCert, desc
                  ) in lcget:
-            print 'looking at listener', listener
+            # print 'looking at listener', listener
             print listener.transport.getPeer().host, srchost
             if listener.transport.getPeer().host == srchost:
-                print 'bound in clients loop'
+                # print 'bound in clients loop'
 
                 bindery.append(
                     BindUDP(q2qsrc=q2qsrc,
@@ -859,18 +859,18 @@ class Q2Q(juice.Juice, subproducer.SuperProducer):
                             udpdst=udpdst,
                             protocol=protocol).do(listener))
         if bindery:
-            print 'bindery return', len(bindery)
+            # print 'bindery return', len(bindery)
             def _justADict(ign):
                 return dict()
             return defer.DeferredList(bindery).addCallback(_justADict)
 
-        print 'what?', lcget
+        # print 'what?', lcget
         if (self.service.getLocalFactories(q2qdst, q2qsrc, protocol)
             and srchost == self._determinePublicIP()):
             self.service.dispatcher.seedNAT(udpdst, srcport, conditional=True)
-            print 'bound locally'
+            # print 'bound locally'
             return dict()
-        print 'conn-error'
+        # print 'conn-error'
         raise ConnectionError("unable to find appropriate UDP binder")
 
     command_BIND_UDP.command = BindUDP
@@ -1064,7 +1064,7 @@ class Q2Q(juice.Juice, subproducer.SuperProducer):
         """
         # Verify stuff!
 
-        print 'handling an inbound', From, to, udp_source
+        # print 'handling an inbound', From, to, udp_source
 
         self.verifyCertificateAllowed(to, From)
 
@@ -1730,7 +1730,7 @@ class VirtualTransport(subproducer.SubProducer):
 
     def loseConnection(self):
         if self.disconnecting:
-            print 'omg wtf loseConnection!???!'
+            # print 'omg wtf loseConnection!???!'
             return
         self.disconnecting = True
         self.q2q.sendCommand('close', id=str(self.id)).addCallbacks(
@@ -1992,16 +1992,16 @@ class PTCPConnectionDispatcher(object):
         return sourcePort
 
     def bindNewPort(self, portNum=0):
-        print 'BINDING', portNum, 'to', self, self.factory.service
+        # print 'BINDING', portNum, 'to', self, self.factory.service
         proto = ptcp.Ptcp(self.factory)
         p = reactor.listenUDP(portNum, proto)
         portNum = p.getHost().port
-        print '   actually', portNum
+        # print '   actually', portNum
         self._ports[portNum] = (p, proto)
         return portNum
 
     def unbindPort(self, portNum):
-        print 'UNBINDING', portNum, 'from', self, self._ports
+        # print 'UNBINDING', portNum, 'from', self, self._ports
         port, proto = self._ports[portNum]
         # proto._stopRetransmitting()
         # port.stopListening()
@@ -2017,7 +2017,8 @@ class PTCPConnectionDispatcher(object):
                 if c.protocol is not None:
                     yield c.protocol
                 else:
-                    print 'NOT yielding', c, 'in', c.state
+                    # print 'NOT yielding', c, 'in', c.state
+                    pass
 
     def killAllConnections(self):
         dl = []

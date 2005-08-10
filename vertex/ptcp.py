@@ -312,10 +312,11 @@ class PtcpConnection(tcpdfa.TCP):
             return
 
         if self._paused:
-            print 'DROPPING A PACKET ON THE FLOOR', packet, self
+            # print 'DROPPING A PACKET ON THE FLOOR', packet, self
             return
         else:
-            print 'NOT dropping', packet, self
+            pass
+            # print 'NOT dropping', packet, self
 
         # XXX TODO: examine 'window' field and adjust sendWindowRemaining
         # is it 'occupying a portion of valid receive sequence space'?  I think
@@ -345,7 +346,7 @@ class PtcpConnection(tcpdfa.TCP):
                         # fully acknowledged, as per RFC!
                         rq.pop(0)
                         self.sendWindowRemaining += segmentOnQueue.segmentLength()
-                        print 'increased send window', self, self.sendWindowRemaining
+                        # print 'increased send window', self, self.sendWindowRemaining
                     else:
                         break
                 else:
@@ -422,15 +423,16 @@ class PtcpConnection(tcpdfa.TCP):
     def _originateOneData(self):
         amount = min(self.sendWindowRemaining, self.mtu)
         sendOut = self._outgoingBytes[:amount]
-        print 'originating data packet', len(sendOut)
+        # print 'originating data packet', len(sendOut)
         self._outgoingBytes = self._outgoingBytes[amount:]
         self.sendWindowRemaining -= len(sendOut)
         self.originate(ack=True, data=sendOut)
 
     def _reallyWrite(self):
-        print self, 'really writing', self._paused
+        # print self, 'really writing', self._paused
         self._nagle = None
         if self._outgoingBytes:
+            # print 'window and bytes', self.sendWindowRemaining, len(self._outgoingBytes)
             while self.sendWindowRemaining and self._outgoingBytes:
                 self._originateOneData()
 
@@ -485,17 +487,17 @@ class PtcpConnection(tcpdfa.TCP):
 
 
     def _writeBufferFull(self):
-        print 'my write buffer is full'
+        # print 'my write buffer is full'
         if (self.producer is not None
-            and not self.producerPaused
-            and self.streamingProducer):
+            and not self.producerPaused):
             self.producerPaused = True
-            print 'producer pausing'
+            # print 'producer pausing'
             self.producer.pauseProducing()
-            print 'producer paused'
+            # print 'producer paused'
         else:
-            print 'but I am not telling my producer to pause!'
-            print '  ', self.producer, self.streamingProducer, self.producerPaused
+            # print 'but I am not telling my producer to pause!'
+            # print '  ', self.producer, self.streamingProducer, self.producerPaused
+            pass
 
 
     disconnected = False
@@ -546,21 +548,22 @@ class PtcpConnection(tcpdfa.TCP):
         self.nextSendSeqNum += sl
 
         if p.mustRetransmit():
-            print self, 'originating retransmittable packet', len(self.retransmissionQueue)
+            # print self, 'originating retransmittable packet', len(self.retransmissionQueue)
             if self.retransmissionQueue:
                 if self.retransmissionQueue[-1].fin:
                     raise AssertionError("Sending %r after FIN??!" % (p,))
-            print 'putting it on the queue'
+            # print 'putting it on the queue'
             self.retransmissionQueue.append(p)
-            print 'and sending it later'
+            # print 'and sending it later'
             self._retransmitLater()
-            if len(self.retransmissionQueue) > 5:
-                print 'oh no my queue is too big'
+            if not self.sendWindowRemaining: # len(self.retransmissionQueue) > 5:
+                # print 'oh no my queue is too big'
                 # This is a random number (5) because I ought to be summing the
                 # packet lengths or something.
                 self._writeBufferFull()
             else:
-                print 'my queue is still small enough', len(self.retransmissionQueue), self
+                # print 'my queue is still small enough', len(self.retransmissionQueue), self, self.sendWindowRemaining
+                pass
         self.ptcp.sendPacket(p)
 
     def stopListening(self):
@@ -611,7 +614,7 @@ class PtcpConnection(tcpdfa.TCP):
     def exit_ESTABLISHED(self, packet=None):
         self.disconnected = True
         try:
-            self.protocol.connectionLost(error.ConnectionLost())
+            self.protocol.connectionLost(error.ConnectionDone())
         except:
             log.err()
         self.protocol = None
@@ -675,7 +678,7 @@ class Ptcp(protocol.DatagramProtocol):
         # print 'Started', self.factory, 'on', self.transport.getHost()
 
     def stopProtocol(self):
-        print 'STOPPED ptcp'
+        # print 'STOPPED ptcp'
         for conn in self._connections.values():
             conn._stopRetransmitting()
 
