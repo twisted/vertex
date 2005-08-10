@@ -278,8 +278,6 @@ class PtcpConnection(tcpdfa.TCP):
         self.peerSendISN = 0
         self.setPeerISN = False
 
-        self._whoamiDeferreds = []
-
     peerSendISN = None
 
     def enter_SYN_RCVD(self, packet):
@@ -300,29 +298,6 @@ class PtcpConnection(tcpdfa.TCP):
         self.peerSendISN = packet.seqNum
         self.nextRecvSeqNum = 1 # _RELATIVE_
 
-
-    _whoIAm = None
-    def whoami(self):
-        if self._whoIAm is not None:
-            return defer.succeed(self._whoIAm)
-
-        if len(self._whoamiDeferreds) == 0:
-            self.originate(syn=True, nat=True)
-
-        d = defer.Deferred()
-        self._whoamiDeferreds.append(d)
-        return d
-
-
-    def _gotAddress(self, host, port):
-        if self._whoamiDeferreds is not None:
-            waiting = self._whoamiDeferreds
-            self._whoamiDeferreds = None
-            self._whoIAm = (host, port)
-            for d in waiting:
-                d.callback((host, port))
-
-
     def packetReceived(self, packet):
         # XXX TODO: probably have to do something to the packet here to
         # identify its relative sequence number.
@@ -335,6 +310,12 @@ class PtcpConnection(tcpdfa.TCP):
                 rq.extend(pkt.fragment(self.mtu))
             self.retransmissionQueue = rq
             return
+
+        if self._paused:
+            print 'DROPPING A PACKET ON THE FLOOR', packet, self
+            return
+        else:
+            print 'NOT dropping', packet, self
 
         # XXX TODO: examine 'window' field and adjust sendWindowRemaining
         # is it 'occupying a portion of valid receive sequence space'?  I think
@@ -364,6 +345,7 @@ class PtcpConnection(tcpdfa.TCP):
                         # fully acknowledged, as per RFC!
                         rq.pop(0)
                         self.sendWindowRemaining += segmentOnQueue.segmentLength()
+                        print 'increased send window', self, self.sendWindowRemaining
                     else:
                         break
                 else:
@@ -417,20 +399,20 @@ class PtcpConnection(tcpdfa.TCP):
         return self.transport.getHost()
 
     def getPeer(self):
-        return self.peerAddressTuple
+        return PtcpAddress(self.peerAddressTuple, self.connID)
 
 
     _outgoingBytes = ''
     _nagle = None
 
     def write(self, bytes):
+        assert not self.disconnected, 'Writing to a transport that was already disconnected.'
         self._outgoingBytes += bytes
         self._writeLater()
 
 
     def writeSequence(self, seq):
         self.write(''.join(seq))
-
 
 
     def _writeLater(self):
@@ -440,11 +422,13 @@ class PtcpConnection(tcpdfa.TCP):
     def _originateOneData(self):
         amount = min(self.sendWindowRemaining, self.mtu)
         sendOut = self._outgoingBytes[:amount]
+        print 'originating data packet', len(sendOut)
         self._outgoingBytes = self._outgoingBytes[amount:]
         self.sendWindowRemaining -= len(sendOut)
         self.originate(ack=True, data=sendOut)
 
     def _reallyWrite(self):
+        print self, 'really writing', self._paused
         self._nagle = None
         if self._outgoingBytes:
             while self.sendWindowRemaining and self._outgoingBytes:
@@ -480,9 +464,13 @@ class PtcpConnection(tcpdfa.TCP):
                                 # not TCP-level.
 
     def loseConnection(self):
-        self.disconnecting = True
-        if not self._outgoingBytes:
-            self._writeBufferEmpty()
+        if self.state in [tcpdfa.SYN_SENT,
+                          tcpdfa.SYN_RCVD,
+                          tcpdfa.ESTABLISHED,
+                          tcpdfa.CLOSE_WAIT]:
+            self.disconnecting = True
+            if not self._outgoingBytes:
+                self._writeBufferEmpty()
 
 
     def _writeBufferEmpty(self):
@@ -497,11 +485,17 @@ class PtcpConnection(tcpdfa.TCP):
 
 
     def _writeBufferFull(self):
+        print 'my write buffer is full'
         if (self.producer is not None
             and not self.producerPaused
             and self.streamingProducer):
             self.producerPaused = True
+            print 'producer pausing'
             self.producer.pauseProducing()
+            print 'producer paused'
+        else:
+            print 'but I am not telling my producer to pause!'
+            print '  ', self.producer, self.streamingProducer, self.producerPaused
 
 
     disconnected = False
@@ -528,6 +522,13 @@ class PtcpConnection(tcpdfa.TCP):
         if not self._outgoingBytes:
             self._writeBufferEmpty()
 
+    _paused = False
+    def pauseProducing(self):
+        self._paused = True
+
+    def resumeProducing(self):
+        self._paused = False
+
     def enter_CLOSE_WAIT(self, packet):
         # print 'Packet that sent us to CLOSE_WAIT:', packet
         pass
@@ -545,15 +546,21 @@ class PtcpConnection(tcpdfa.TCP):
         self.nextSendSeqNum += sl
 
         if p.mustRetransmit():
+            print self, 'originating retransmittable packet', len(self.retransmissionQueue)
             if self.retransmissionQueue:
                 if self.retransmissionQueue[-1].fin:
-                    raise AssertionError("Sending data after FIN??!")
+                    raise AssertionError("Sending %r after FIN??!" % (p,))
+            print 'putting it on the queue'
             self.retransmissionQueue.append(p)
+            print 'and sending it later'
             self._retransmitLater()
             if len(self.retransmissionQueue) > 5:
+                print 'oh no my queue is too big'
                 # This is a random number (5) because I ought to be summing the
                 # packet lengths or something.
                 self._writeBufferFull()
+            else:
+                print 'my queue is still small enough', len(self.retransmissionQueue), self
         self.ptcp.sendPacket(p)
 
     def stopListening(self):
@@ -564,7 +571,8 @@ class PtcpConnection(tcpdfa.TCP):
         """
         The connection never got anywhere.  Goodbye.
         """
-        self.factory.clientConnectionFailed(error.TimeoutError())
+        # XXX CONNECTOR API OMFG
+        self.factory.clientConnectionFailed(None, error.TimeoutError())
 
     def enter_TIME_WAIT(self, packet=None):
         del self.ptcp._connections[self.connID]
@@ -580,6 +588,9 @@ class PtcpConnection(tcpdfa.TCP):
         This is an error for Ptcp.
         """
         raise StateError("You can't write anything until someone connects to you.")
+
+    def invalidInput(self, datum):
+        print self, self.protocol, 'invalid input', datum
 
     def enter_ESTABLISHED(self, packet):
         """
@@ -598,6 +609,7 @@ class PtcpConnection(tcpdfa.TCP):
             self.protocol = p
 
     def exit_ESTABLISHED(self, packet=None):
+        self.disconnected = True
         try:
             self.protocol.connectionLost(error.ConnectionLost())
         except:
@@ -626,6 +638,12 @@ class PtcpAddress(object):
         self.host = host
         self.port = port
         self.connid = connid
+
+    def __repr__(self):
+        return 'PtcpAddress((%r, %r), %r)' % (
+            self.host, self.port, self.connid)
+
+
 
 
 class Ptcp(protocol.DatagramProtocol):
@@ -657,8 +675,9 @@ class Ptcp(protocol.DatagramProtocol):
         # print 'Started', self.factory, 'on', self.transport.getHost()
 
     def stopProtocol(self):
-        for conn in self._connections:
-            pass
+        print 'STOPPED ptcp'
+        for conn in self._connections.values():
+            conn._stopRetransmitting()
 
     def datagramReceived(self, bytes, addr):
         if len(bytes) < _fixedSize:

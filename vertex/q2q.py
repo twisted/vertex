@@ -1,4 +1,4 @@
-# -*- test-case-name: vertex.test.test_q2q.UDPConnection.testChooserGetsThreeChoices -*-
+# -*- test-case-name: vertex.test.test_q2q.TCPConnection -*-
 # Copyright 2005 Divmod, Inc.  See LICENSE file for details
 
 # stdlib
@@ -24,6 +24,8 @@ from vertex import sslverify, juice, subproducer, ptcp
 from vertex import endpoint
 from vertex.conncache import ConnectionCache
 
+from vertex._unfortunate_defer_hack import DeferredList as FOOCBDeferredList
+
 MESSAGE_PROTOCOL = 'q2q-message'
 port = 8788
 
@@ -38,32 +40,6 @@ class NoAttemptsMade(ConnectionError):
 
 class BadCertificateRequest(sslverify.VerifyError):
     pass
-
-def _endeferify(funcsAndArgs, failureChain=None):
-    """ Take a list of function/arg/kw tuples and call them each in turn, returning
-    a Deferred that fires with the first successful attempt.  This is used for
-    attempting each connection mechanism in turn and then finally succeeding.
-
-    @param funcsAndArgs: an iterable of (func, args, kw) tuples.
-    @param lastFailure: a Failure instance (or None)
-    """
-    stuff = iter(funcsAndArgs)
-    if failureChain is None:
-        failureChain = []
-        if len(funcsAndArgs) == 0:
-            return defer.fail(NoAttemptsMade(
-                    "there was no available connection path"))
-    try:
-        function, arguments, keywords = stuff.next()
-    except StopIteration:
-        return defer.fail(AttemptsFailed(failureChain))
-    else:
-        D = defer.maybeDeferred(function, *arguments, **keywords)
-        def _fcrecurse(f):
-            failureChain.append(f)
-            return _endeferify(stuff, failureChain)
-        D.addErrback(_fcrecurse)
-        return D
 
 class IgnoreConnectionFailed(protocol.ClientFactory):
     def __init__(self, realFactory):
@@ -232,65 +208,47 @@ class SimpleStringList(juice.Argument):
             return []
         return inString.split(self.separator)
 
-class VirtualMethod:
-    def __init__(self, virt=None):
-        pass
-
-    relayable = False
-
-    def toString(self):
-        return 'virtual'
-
-    def __repr__(self):
-        return '<%s>' % (self.toString(),)
-
-    def attemptConnect(self, q2qproto, connectionID, From, to,
-                       protocolName, protocolFactory, localudp):
-        """
-        Returns a deferred which fires the protocol that results from
-        establishing a virtual connection.
-        """
-
-        innerTransport = VirtualTransport(
-            q2qproto, From, to,
-            protocolName, connectionID,
-            protocolFactory,
-            isClient=True)
-
-        def startit(result):
-            proto = innerTransport.startProtocol()
-            return proto
-
-        return Virtual(Id=connectionID).do(q2qproto).addCallback(
-            startit)
 
 from twisted.internet import protocol
 
 class Q2QClientProtocolFactoryWrapper:
 
-    def __init__(self, cpf, fromAddress, toAddress, protocolName,
+    def __init__(self, service, cpf, fromAddress, toAddress, protocolName,
                  connectionEstablishedDeferred):
+        self.service = service
         self.cpf = cpf
         self.fromAddress = fromAddress
         self.toAddress = toAddress
         self.protocolName = protocolName
         self.connectionEstablishedDeferred = connectionEstablishedDeferred
+        connectionEstablishedDeferred.addCallback(self.setMyClient)
 
+    myClient = None
+    def setMyClient(self, myClient):
+        self.myClient = myClient
+        return myClient
 
     def buildProtocol(self, addr):
         # xxx modify addr to include q2q information.
         subProto = self.cpf.buildProtocol(self.toAddress)
-        myProto = SeparateConnectionTransport(subProto, self.fromAddress,
+        myProto = SeparateConnectionTransport(self.service, subProto, self.fromAddress,
                                               self.toAddress, self.protocolName,
                                               self.connectionEstablishedDeferred)
         return myProto
 
     def clientConnectionFailed(self, connector, reason):
-        self.cpf.clientConnectionFailed(connector, reason)
+        # DON'T forward this to our client protocol factory; only one attempt
+        # has failed; let that happen later, when _ALL_ attempts have failed.
         self.connectionEstablishedDeferred.errback(reason)
 
     def clientConnectionLost(self, connector, reason):
-        self.cpf.clientConnectionLost(connector, reason)
+        # as in clientConnectionFailed, don't bother to forward; this
+        # clientConnectionLost is actually a clientConnectionFailed for the
+        # underlying transport.
+        if self.myClient is not None:
+            # forward in this case because it's likely that we need to pass it
+            # along...
+            self.cpf.clientConnectionLost(connector, reason)
 
     def doStart(self):
         self.cpf.doStart()
@@ -298,13 +256,18 @@ class Q2QClientProtocolFactoryWrapper:
     def doStop(self):
         self.cpf.doStop()
 
-class AbstractConnectionAttempt:
+class ImmediatelyLoseConnection(protocol.Protocol):
+    def connectionMade(self):
+        self.transport.loseConnection()
+
+class AbstractConnectionAttempt(protocol.ClientFactory):
 
 
     def __init__(self, method, q2qproto, connectionID, fromAddress, toAddress,
-                 protocolName, clientProtocolFactory, localudp, issueGreeting=False):
+                 protocolName, clientProtocolFactory, issueGreeting=False):
         self.method = method
         self.q2qproto = q2qproto
+        assert isinstance(connectionID, str)
         self.connectionID = connectionID
         self.q2qproto = q2qproto
         self.fromAddress = fromAddress
@@ -312,9 +275,9 @@ class AbstractConnectionAttempt:
         self.protocolName = protocolName
         self.deferred = defer.Deferred()
         self.clientProtocolFactory = Q2QClientProtocolFactoryWrapper(
+            q2qproto.service,
             clientProtocolFactory, fromAddress, toAddress, protocolName,
             self.deferred)
-        self.localudp = localudp
         self.issueGreeting = issueGreeting
 
 
@@ -328,9 +291,12 @@ class AbstractConnectionAttempt:
 
 
     q2qb = None
+
+    cancelled = False
+
     def buildProtocol(self, addr):
         if self.cancelled:
-            return None
+            return ImmediatelyLoseConnection()
         assert self.q2qb is None
         self.q2qb = Q2QBootstrap(self.issueGreeting,
                                  self.connectionID,
@@ -338,7 +304,11 @@ class AbstractConnectionAttempt:
         return self.q2qb
 
     def clientConnectionFailed(self, connector, reason):
-        self.clientProtocolFactory.clientConnectionFailed(connector, reason)
+        """
+        """
+        # Don't bother forwarding.  In fact this should probably never be
+        # called because we're not bothering to forward them along from
+        # Q2QClientProtocolFactoryWrapper
 
     def clientConnectionLost(self, connector, reason):
         """
@@ -365,6 +335,7 @@ class TCPConnectionAttempt(AbstractConnectionAttempt):
         reactor.connectTCP(self.method.host, self.method.port, self)
         return self.deferred
 
+
 class TCPMethod:
     def __init__(self, hostport):
         self.host, port = hostport.split(':')
@@ -383,13 +354,45 @@ class TCPMethod:
     def attempt(self, *a):
         return [self.attemptFactory(self, *a)]
 
+connectionCounter = itertools.count().next
+connectionCounter()
+
+class VirtualConnectionAttempt(AbstractConnectionAttempt):
+    def startAttempt(self):
+        cid = connectionCounter()
+        if self.q2qproto.isServer:
+            cid = -cid
+        innerTransport = VirtualTransport(self.q2qproto, cid, self, True)
+        def startit(result):
+            proto = innerTransport.startProtocol()
+            return self.deferred
+
+        return Virtual(Id=cid).do(self.q2qproto).addCallback(
+            startit)
+
+
+class VirtualMethod:
+    def __init__(self, virt=None):
+        pass
+
+    relayable = False
+
+    def toString(self):
+        return 'virtual'
+
+    def __repr__(self):
+        return '<%s>' % (self.toString(),)
+
+    def attempt(self, *a):
+        return [VirtualConnectionAttempt(self, *a)]
+
 
 class _PTCPConnectionAttempt1NoPress(AbstractConnectionAttempt):
     def startAttempt(self):
         svc = self.q2qproto.service
         dsp = svc.dispatcher
         dsp.connectPTCP(
-            self.host, self.port, self,
+            self.method.host, self.method.port, self,
             svc.sharedUDPPortnum)
         return self.deferred
 
@@ -399,14 +402,17 @@ class _PTCPConnectionAttemptPress(AbstractConnectionAttempt):
         dsp = svc.dispatcher
         newPort = self.newPort = dsp.bindNewPort()
         dsp.connectPTCP(
-            self.host, self.port, self,
+            self.method.host, self.method.port, self,
             newPort)
 
         return self.deferred
 
     def cancel(self):
+        if not self.cancelled:
+            self.q2qproto.service.dispatcher.unbindPort(self.newPort)
+        else:
+            print 'totally wacky, [press] cancelled twice!'
         AbstractConnectionAttempt.cancel(self)
-        self.q2qproto.service.dispatcher.unbindPort(self.newPort)
 
 class PTCPMethod(TCPMethod):
     """Pseudo-TCP method.
@@ -419,7 +425,7 @@ class PTCPMethod(TCPMethod):
 
 class RPTCPConnectionAttempt(AbstractConnectionAttempt):
     def startAttempt(self):
-        realLocalUDP = self.newPort = self.q2qproto.service.dispatcher.seedNAT((self.host, self.port))
+        realLocalUDP = self.newPort = self.q2qproto.service.dispatcher.seedNAT((self.method.host, self.method.port))
         # self.host and self.port are remote host and port
         # realLocalUDP is a local port
 
@@ -433,22 +439,26 @@ class RPTCPConnectionAttempt(AbstractConnectionAttempt):
         # we include protocol as an arg because this is helpful for relaying.
 
         def enbinden(boundereded):
-            self.q2qproto.service.dispatcher.connectPTCP(
-                self.host, self.port, self, realLocalUDP
-            )
+            if not self.cancelled:
+                self.q2qproto.service.dispatcher.connectPTCP(
+                    self.method.host, self.method.port, self, realLocalUDP
+                    )
             return self.deferred
 
         return BindUDP(
             q2qsrc=self.toAddress,
             q2qdst=self.fromAddress,
             protocol=self.protocolName,
-            udpsrc=(self.host, self.port),
+            udpsrc=(self.method.host, self.method.port),
             udpdst=(self.q2qproto._determinePublicIP(), realLocalUDP)
             ).do(self.q2qproto).addCallback(enbinden)
 
     def cancel(self):
+        if not self.cancelled:
+            self.q2qproto.service.dispatcher.unbindPort(self.newPort)
+        else:
+            print 'totally wacky, [rptcp] cancelled twice!'
         AbstractConnectionAttempt.cancel(self)
-        self.q2qproto.service.dispatcher.unbindPort(self.newPort)
 
 
 
@@ -476,7 +486,7 @@ class UnknownMethod:
         self.string = S
 
     def attemptConnect(self, q2qproto, connectionID, From, to,
-                       protocolName, protocolFactory, localudp):
+                       protocolName, protocolFactory):
         return defer.fail(Failure(ConnectionError(
                     "unknown connection method: %s" % (self.string,))))
 
@@ -563,7 +573,7 @@ class Virtual(juice.Command):
     commandName = 'virtual'
     result = []
 
-    arguments = [('id', juice.String())]
+    arguments = [('id', juice.Integer())]
 
     def makeResponse(cls, objects, proto):
         tpt = objects.pop('__transport__')
@@ -729,6 +739,19 @@ class Sign(juice.Command):
     errors = {KeyError: "NoSuchUser",
               BadCertificateRequest: "BadCertificateRequest"}
 
+class Choke(juice.Command):
+    """Ask our peer to be quiet for a while.
+    """
+    commandName = 'Choke'
+    arguments = [('id', juice.Integer())]
+
+
+class Unchoke(juice.Command):
+    """Reverse the effects of a choke.
+    """
+    commandName = 'Unchoke'
+    arguments = [('id', juice.Integer())]
+
 def textEncode(S):
     return S.encode('base64').replace('\n', '')
 
@@ -818,20 +841,36 @@ class Q2Q(juice.Juice, subproducer.SuperProducer):
         # this IP...
         srchost, srcport = udpsrc
 
+        lcget = self.service.listeningClients.get((q2qsrc, protocol), ())
+
+        bindery = []
+
+        for (listener, listenCert, desc
+                 ) in lcget:
+            print 'looking at listener', listener
+            print listener.transport.getPeer().host, srchost
+            if listener.transport.getPeer().host == srchost:
+                print 'bound in clients loop'
+
+                bindery.append(
+                    BindUDP(q2qsrc=q2qsrc,
+                            q2qdst=q2qdst,
+                            udpsrc=udpsrc,
+                            udpdst=udpdst,
+                            protocol=protocol).do(listener))
+        if bindery:
+            print 'bindery return', len(bindery)
+            def _justADict(ign):
+                return dict()
+            return defer.DeferredList(bindery).addCallback(_justADict)
+
+        print 'what?', lcget
         if (self.service.getLocalFactories(q2qdst, q2qsrc, protocol)
             and srchost == self._determinePublicIP()):
-            self.service.dispatcher.seedNAT(udpdst, srcport)
+            self.service.dispatcher.seedNAT(udpdst, srcport, conditional=True)
+            print 'bound locally'
             return dict()
-        else:
-            for (listener, listenCert, desc
-                 ) in self.service.listeningClients.get(
-                (q2qsrc, protocol), ()):
-                if listener.transport.getPeer().host == srchost:
-                    return BindUDP(q2qsrc=q2qsrc,
-                                   q2qdst=q2qdst,
-                                   udpsrc=udpsrc,
-                                   udpdst=udpdst,
-                                   protocol=protocol).do(listener)
+        print 'conn-error'
         raise ConnectionError("unable to find appropriate UDP binder")
 
     command_BIND_UDP.command = BindUDP
@@ -1082,7 +1121,8 @@ class Q2Q(juice.Juice, subproducer.SuperProducer):
                     localMethods.append(
                         RPTCPMethod("%s:%d" % (publicIP, udpxPort)))
 
-            localMethods.append(VirtualMethod())
+            if self.service.virtualEnabled:
+                localMethods.append(VirtualMethod())
             log.msg('sending local methods to peer: %r' % (localMethods,))
 
             for serverFactory, description in srvfacts:
@@ -1093,10 +1133,9 @@ class Q2Q(juice.Juice, subproducer.SuperProducer):
                                    methods=localMethods,
                                    description=description))
 
-        # We've looked for our local factory.  Let's see if we have any
-        # listening protocols elsewhere.
+            # We've looked for our local factory.  Let's see if we have any
+            # listening protocols elsewhere.
 
-        print 'found methods:', localMethods
 
         key = (to, protocol)
         if key in self.service.listeningClients:
@@ -1155,6 +1194,27 @@ class Q2Q(juice.Juice, subproducer.SuperProducer):
 
     command_SOURCE_IP.command = SourceIP
 
+    def _resume(self, connection, data, writeDeferred):
+        try:
+            connection.dataReceived(data)
+        except:
+            writeDeferred.errback()
+        else:
+            writeDeferred.callback(juice.Box())
+
+
+    def command_CHOKE(self, id):
+        connection = self.connections[id]
+        connection.choke()
+        return {}
+    command_CHOKE.command = Choke
+
+    def command_UNCHOKE(self, id):
+        connection = self.connections[id]
+        connection.unchoke()
+        return {}
+    command_UNCHOKE.command = Unchoke
+
     def juice_WRITE(self, box):
         """
 
@@ -1173,7 +1233,7 @@ class Q2Q(juice.Juice, subproducer.SuperProducer):
             S:
 
         """
-        connection = self.connections[box['id']]
+        connection = self.connections[int(box['id'])]
         data = box[juice.BODY]
         connection.dataReceived(data)
         return juice.Box()
@@ -1193,7 +1253,7 @@ class Q2Q(juice.Juice, subproducer.SuperProducer):
 
         """
         from twisted.internet.main import CONNECTION_DONE
-        self.connections[box['id']].connectionLost(CONNECTION_DONE)
+        self.connections[int(box['id'])].connectionLost(CONNECTION_DONE)
         return juice.Box()
 
     def command_SIGN(self, certificate_request, password):
@@ -1340,13 +1400,14 @@ class Q2Q(juice.Juice, subproducer.SuperProducer):
                       Authorize=authorize).do(self).addCallback(_cbSecure)
 
     def command_VIRTUAL(self, id):
-        cwait, call = self.service.inboundConnections.pop(id)
-        call.cancel()
+        if self.isServer:
+            assert id > 0
+        else:
+            assert id < 0
         # We are double-deferring here so that we only start writing data to
         # our client _after_ they have processed our ACK.
-        tpt = VirtualTransport(self, cwait.to, cwait.From, cwait.protocolName,
-                               id, cwait.protocolFactory,
-                               False)
+        tpt = VirtualTransport(self, id, self.service._bootstrapFactory, False)
+
 
         return dict(__transport__=tpt)
 
@@ -1356,29 +1417,39 @@ class Q2Q(juice.Juice, subproducer.SuperProducer):
     # Client/Support methods.
 
     def attemptConnectionMethods(self, methods, connectionID, From, to,
-                                 protocolName, protocolFactory,
-                                 localudp):
-        wrapperFactory = IgnoreConnectionFailed(protocolFactory)
-
-        def oneAttemptSucceeded((result, index)):
-            # XXX Cancel outstanding attempts, maybe.  They'll fail anyway,
-            # because the factory will return None from buildProtocol().
-            for n, att in enumerate(attemptObjects):
-                if n != index:
-                    att.cancel()
-            return result
-
+                                 protocolName, protocolFactory):
         attemptObjects = []
         for meth in methods:
             atts = meth.attempt(self, connectionID, From, to,
-                                protocolName, protocolFactory,
-                                localudp)
+                                protocolName, protocolFactory)
             attemptObjects.extend(atts)
 
-        attemptDeferreds = [att.deferred for att in attemptObjects]
+        attemptDeferreds = [att.startAttempt() for att in attemptObjects]
 
-        d = defer.DeferredList(attemptDeferreds, fireOnOneCallback=True)
-        d.addCallback(oneAttemptSucceeded)
+        d = FOOCBDeferredList(attemptDeferreds,
+                              fireOnOneCallback=True,
+                              fireOnOneErrback=False)
+        def gotResults(results):
+            theResult = None
+            anyResult = False
+            for index, (success, result) in enumerate(results):
+                if success:
+                    # woohoo!  home free.
+                    # XXX Cancel outstanding attempts, maybe.  They'll fail anyway,
+                    # because the factory will return None from buildProtocol().
+                    theResult = result
+                    anyResult = True
+                else:
+                    attemptObjects[index].cancel()
+            if anyResult:
+                # theResult will be a SeparateConnectionTransport
+                return theResult.subProtocol
+            else:
+                reason = Failure(AttemptsFailed([fobj for (f, fobj) in results]))
+                protocolFactory.clientConnectionFailed(None, reason)
+                return reason
+
+        d.addCallback(gotResults)
         return d
 
     def listen(self, fromAddress, protocols, serverDescription):
@@ -1401,7 +1472,6 @@ class Q2Q(juice.Juice, subproducer.SuperProducer):
         connected, or fails with AttemptsFailed if the connection was not
         possible.
         """
-        print 'attempting a connection', From, to
 
         publicIP = self._determinePublicIP()
 
@@ -1416,7 +1486,6 @@ class Q2Q(juice.Juice, subproducer.SuperProducer):
         else:
             # don't tell them because we don't know
             log.msg("dispatcher unavailable when connecting")
-            localudp = None
 
         D = Inbound(**A).do(self)
 
@@ -1430,7 +1499,6 @@ class Q2Q(juice.Juice, subproducer.SuperProducer):
                         listener['id'],
                         From, to,
                         protocolName, clientFactory,
-                        localudp
                         )
                     allConnectionAttempts.append(d)
                 return defer.DeferredList(allConnectionAttempts)
@@ -1461,7 +1529,22 @@ class Q2Q(juice.Juice, subproducer.SuperProducer):
             return listenersD.addCallback(finishedAllAttempts)
         return D.addCallback(_connected)
 
-class Q2QLayeringMixin:
+
+class SeparateConnectionTransport(object):
+    def __init__(self,
+                 service,
+                 subProtocol,
+                 q2qhost,
+                 q2qpeer,
+                 protocolName,
+                 connectionEstablishedDeferred=None):
+        self.service = service
+        self.subProtocol = subProtocol
+        self.q2qhost = q2qhost
+        self.q2qpeer = q2qpeer
+        self.protocolName = protocolName
+        self.connectionEstablishedDeferred = connectionEstablishedDeferred
+
     subProtocol = None
     q2qhost = None
     q2qpeer = None
@@ -1478,9 +1561,12 @@ class Q2QLayeringMixin:
     def getQ2QPeer(self):
         return self.q2qpeer
 
-    def connectionMade(self):
-        self.service.tcpConnections.append(self)
-
+    def makeConnection(self, tpt):
+        self.transport = tpt
+        self.service.subConnections.append(self)
+        self.subProtocol.makeConnection(self)
+        if self.connectionEstablishedDeferred is not None:
+            self.connectionEstablishedDeferred.callback(self)
 
     def getPeer(self):
         return Q2QTransportAddress(self.getQ2QPeer(),
@@ -1511,56 +1597,9 @@ class Q2QLayeringMixin:
         self.transport.loseConnection()
 
     def connectionLost(self, reason):
-        self.service.tcpConnections.remove(self)
+        self.service.subConnections.remove(self)
         if self.subProtocol is not None:
-            return self.subProtocol.connectionLost(reason)
-
-class SeparateConnectionTransport(Q2QLayeringMixin):
-    def __init__(self, subProtocol, q2qhost, q2qpeer, protocolName,
-                 connectionEstablishedDeferred):
-        self.subProtocol = subProtocol
-        self.q2qhost = q2qhost
-        self.q2qpeer = q2qpeer
-        self.protocolName = protocolName
-        self.connectionEstablishedDeferred = connectionEstablishedDeferred
-
-    def makeConnection(self, tpt):
-        Q2QLayeringMixin.makeConnection(self, tpt)
-        self.connectionEstablishedDeferred.callback(self)
-
-class Q2QTCPConnector(Q2QLayeringMixin, protocol.ClientFactory, protocol.Protocol):
-    """
-    I am an implementor of IClientFactory that can hook up a ClientFactory to a
-    listening port.
-    """
-    def __init__(self, service, connectionID, From, to, protocolFactory):
-        self.service = service
-        self.connectionID = connectionID
-        self.q2qhost = From
-        self.q2qpeer = to
-        self.protocolFactory = protocolFactory
-        self.deferred = defer.Deferred()
-
-    addr = None
-
-    def buildProtocol(self, addr):
-        assert self.addr is None, "You shouldn't re-use these: %s" % (self.addr,)
-        self.addr = addr
-        return self
-
-    def connectionMade(self):
-        Q2QLayeringMixin.connectionMade(self)
-        self.transport.write('Q2Q %s\r\n' % self.connectionID)
-        self.subProtocol = self.protocolFactory.buildProtocol(self.addr)
-        self.subProtocol.makeConnection(self)
-        self.deferred.callback(self.subProtocol)
-
-    def clientConnectionLost(self, connector, reason):
-        self.protocolFactory.clientConnectionLost(connector, reason)
-
-    def clientConnectionFailed(self, connector, reason):
-        self.protocolFactory.clientConnectionFailed(connector, reason)
-        self.deferred.errback(reason)
+            self.subProtocol.connectionLost(reason)
 
 class WhoAmI(juice.Command):
     commandName = 'Who-Am-I'
@@ -1576,24 +1615,29 @@ class RetrieveConnection(juice.ProtocolSwitchCommand):
         ('identifier', juice.String()),
         ]
 
+    fatalErrors = {KeyError: "NoSuchConnection"}
+
 class Q2QBootstrap(juice.Juice):
     def __init__(self, issueGreeting, connIdentifier=None, protoFactory=None):
         juice.Juice.__init__(self, issueGreeting)
+        assert connIdentifier is None or isinstance(connIdentifier, (str))
         self.connIdentifier = connIdentifier
         self.protoFactory = protoFactory
 
     def connectionMade(self):
         if self.connIdentifier is not None:
-            self.retrieveConnection(self.connIdentifier, self.protoFactory)
+            def trapKeyError(err):
+                err.trap(KeyError)
+            self.retrieveConnection(self.connIdentifier, self.protoFactory).addErrback(trapKeyError)
 
     def connectionLost(self, reason):
         juice.Juice.connectionLost(self, reason)
-        if self.protocolFactory is not None:
+        if self.protoFactory is not None:
             if self.innerProtocol is not None:
                 # XXX TODO: MUST IMPLEMENT ICONNECTOR
-                self.clientConnectionLost(self, reason)
+                self.protoFactory.clientConnectionLost(self, reason)
             else:
-                self.clientConnectionFailed(self, reason)
+                self.protoFactory.clientConnectionFailed(self, reason)
 
     def whoami(self):
         """Return a Deferred which fires with a 2-tuple of (dotted quad ip, port
@@ -1617,39 +1661,20 @@ class Q2QBootstrap(juice.Juice):
 
 
     def command_RETRIEVE_CONNECTION(self, identifier):
-        proto, self.q2qhost, self.q2qpeer = self.service.protocolAndAuthFromId(identifier, self)
-        if proto is None:
-            self.transport.loseConnection()
+        listenerInfo = self.service.lookupListener(identifier)
+        if listenerInfo is None:
+            raise KeyError()
         else:
-            self.switchTo(proto)
+            proto = listenerInfo.protocolFactory.buildProtocol(listenerInfo.From)
+            self.switchTo(SeparateConnectionTransport(
+                    self.service,
+                    proto,
+                    listenerInfo.to,
+                    listenerInfo.From,
+                    listenerInfo.protocolName))
             return {}
+
     command_RETRIEVE_CONNECTION.command = RetrieveConnection
-
-
-class Q2QTCPListener(Q2QLayeringMixin, protocol.Protocol):
-    buf = ''
-
-    def dataReceived(self, data):
-        if self.subProtocol is None:
-            self.buf += data
-            bufz = self.buf.split('\r\n',1)
-            if len(bufz) > 1:
-                # We've got our Q2Q ID
-                intro, rest = bufz
-                command, id = intro.split(' ',1)
-                if command != 'Q2Q':
-                    self.transport.loseConnection()
-                    return
-                proto, self.q2qhost, self.q2qpeer = self.service.protocolAndAuthFromId(id, self)
-                if proto is None:
-                    self.transport.loseConnection()
-                    return
-                self.subProtocol = proto
-                proto.makeConnection(self)
-                if rest:
-                    proto.dataReceived(rest)
-        else:
-            return Q2QLayeringMixin.dataReceived(self, data)
 
 class Q2QBootstrapFactory(protocol.Factory):
     def __init__(self, service):
@@ -1664,22 +1689,11 @@ class VirtualTransport(subproducer.SubProducer):
     implements(interfaces.IProducer, interfaces.ITransport, interfaces.IConsumer)
     disconnecting = False
 
-    def __init__(self, q2q, hostAddress, peerAddress,
-                 protocolName, connectionID, protocolFactory,
-                 isClient):
+    def __init__(self, q2q, connectionID, protocolFactory, isClient):
         """
         @param q2q: a Q2Q Protocol instance.
 
-        @param peerAddress: a Q2QAddress instance identifying the peer entity
-        on this connection.
-
-        @param hostAddress: a Q2QAddress instance identifying the host entity
-        on this connection.
-
-        @param protocolName: a string describing the name of the protocol being
-        spoken over this connection, i.e. 'http'.
-
-        @param connectionID: a string identifier, unique to the q2q instance
+        @param connectionID: an integer identifier, unique to the q2q instance
         that I am wrapping (my underlying physical connection).
 
         @param protocolFactory: an IProtocolFactory implementor which returns a
@@ -1693,31 +1707,40 @@ class VirtualTransport(subproducer.SubProducer):
         subproducer.SubProducer.__init__(self, q2q)
         self.q2q = q2q
 
-        self._host = hostAddress
-        self._peer = peerAddress
         self.id = connectionID
         self.isClient = isClient
         self.q2q.connections[self.id] = self
-        self.protocolName = protocolName
         self.protocolFactory = protocolFactory
 
+    protocol = None
+
     def startProtocol(self):
-        self.protocol = self.protocolFactory.buildProtocol(self._peer)
+        self.protocol = self.protocolFactory.buildProtocol(self.getPeer())
         self.protocol.makeConnection(self)
         return self.protocol
+
+    def pauseProducing(self):
+        Choke(id=self.id).do(self.q2q, requiresAnswer=False)
+
+    def resumeProducing(self):
+        Unchoke(id=self.id).do(self.q2q, requiresAnswer=False)
 
     def writeSequence(self, iovec):
         self.write(''.join(iovec))
 
     def loseConnection(self):
+        if self.disconnecting:
+            print 'omg wtf loseConnection!???!'
+            return
         self.disconnecting = True
-        self.q2q.sendCommand('close', id=self.id).addCallbacks(
+        self.q2q.sendCommand('close', id=str(self.id)).addCallbacks(
             lambda ign: self.connectionLost(CONNECTION_DONE),
             self.connectionLost)
 
     def connectionLost(self, reason):
         del self.q2q.connections[self.id]
-        self.protocol.connectionLost(reason)
+        if self.protocol is not None:
+            self.protocol.connectionLost(reason)
         if self.isClient:
             self.protocolFactory.clientConnectionLost(None, reason)
 
@@ -1736,26 +1759,14 @@ class VirtualTransport(subproducer.SubProducer):
             self.connectionLost(reason)
 
     def write(self, data):
-        self.q2q.sendCommand('write', data,
-                             id=self.id)
+        self.q2q.sendCommand('write', data, False,
+                             id=str(self.id))
 
     def getHost(self):
-        return Q2QTransportAddress(
-            self._host,
-            VirtualTransportAddress(self.q2q.transport.getHost()),
-            self.protocolName)
+        return VirtualTransportAddress(self.q2q.transport.getHost())
 
     def getPeer(self):
-        return Q2QTransportAddress(
-            self._peer,
-            VirtualTransportAddress(self.q2q.transport.getPeer()),
-            self.protocolName)
-
-    def getQ2QPeer(self):
-        return self._peer
-
-    def getQ2QHost(self):
-        return self._host
+        return VirtualTransportAddress(self.q2q.transport.getPeer())
 
 
 _counter = 0
@@ -1912,10 +1923,6 @@ class _ConnectionWaiter(_structlike):
                  'protocolFactory',
                  'isClient']
 
-    def createProtocolWithTransport(self, transport):
-        prot = self.protocolFactory.buildProtocol(transport.getPeer())
-        return prot
-
 class Q2QClientFactory(protocol.ClientFactory):
 
     def __init__(self, service):
@@ -1940,13 +1947,7 @@ class AddressDiscoveryProtocol(juice.Juice):
         self.addrDiscDef = addrDiscDef
 
     def connectionMade(self):
-        pass
-
-    def command_YOUR_ADDRESS(self, address):
-        self.addrDiscDef.callback(address)
-        self.addrDiscDef = None
-        self.transport.loseConnection()
-    command_YOUR_ADDRESS.command = YourAddress
+        WhoAmI().do(self).chainDeferred(self.addrDiscDef)
 
     def connectionLost(self, reason):
         if self.addrDiscDef is not None:
@@ -1956,9 +1957,16 @@ class _AddressDiscoveryFactory(protocol.ClientFactory):
     def __init__(self, addressDiscoveredDeferred):
         self.addressDiscoveredDeferred = addressDiscoveredDeferred
 
+    def clientConnectionFailed(self, connector, reason):
+        self.addressDiscoveredDeferred.errback(reason)
+
+    def clientConnectionLost(self, connector, reason):
+        """
+        """
+
     def buildProtocol(self, addr):
-        # print 'sweet'
-        return AddressDiscoveryProtocol(self.addressDiscoveredDeferred)
+        adp = AddressDiscoveryProtocol(self.addressDiscoveredDeferred)
+        return adp
 
 
 def _noResults(*x):
@@ -1969,43 +1977,47 @@ class PTCPConnectionDispatcher(object):
         self.factory = factory
         self._ports = {}
 
-    def seedNAT(self, (host, port), sourcePort=0):
+    def seedNAT(self, (host, port), sourcePort=0, conditional=True):
         if sourcePort not in self._ports:
-            assert sourcePort == 0
-            proto = ptcp.Ptcp(self.factory)
-            proto.peerAddressTuple = (host, port)
-            p = reactor.listenUDP(sourcePort, proto)
-            portNum = p.getHost().port
-            self._ports[portNum] = (p, proto)
+            if sourcePort != 0:
+                if conditional:
+                    return None
+                else:
+                    print 'tried to seed %r in %r %r %r' % (sourcePort, self, self._ports, self.factory.service)
+            sourcePort = self.bindNewPort(sourcePort)
         else:
             assert sourcePort != 0
-            p, proto = self._ports[sourcePort]
+        p, proto = self._ports[sourcePort]
         proto.sendPacket(ptcp.PtcpPacket.create(0, 0, 0, '', destination=(host, port)))
-        return portNum
+        return sourcePort
 
     def bindNewPort(self, portNum=0):
+        print 'BINDING', portNum, 'to', self, self.factory.service
         proto = ptcp.Ptcp(self.factory)
         p = reactor.listenUDP(portNum, proto)
         portNum = p.getHost().port
+        print '   actually', portNum
         self._ports[portNum] = (p, proto)
         return portNum
 
     def unbindPort(self, portNum):
+        print 'UNBINDING', portNum, 'from', self, self._ports
         port, proto = self._ports[portNum]
-        proto._stopRetransmitting()
-        port.stopListening()
-        del self._ports[portNum]
+        # proto._stopRetransmitting()
+        # port.stopListening()
+        # del self._ports[portNum]
 
-    def connectPTCP(self, host, port, factory):
-        proto = ptcp.Ptcp(self.factory)
-        p = reactor.listenUDP(0, proto)
-        self._ports[p.getHost().port] = p
+    def connectPTCP(self, host, port, factory, sourcePort):
+        p, proto = self._ports[sourcePort]
         return proto.connect(factory, host, port)
 
     def iterconnections(self):
-        for p in self._ports.itervalues():
+        for (p, proto) in self._ports.itervalues():
             for c in p.protocol._connections.itervalues():
-                yield c
+                if c.protocol is not None:
+                    yield c.protocol
+                else:
+                    print 'NOT yielding', c, 'in', c.state
 
     def killAllConnections(self):
         dl = []
@@ -2022,6 +2034,11 @@ class Q2QService(service.MultiService, protocol.ServerFactory):
     publicIP = None
     _publicIPIsReallyPrivate = False
 
+    debugName = 'service'
+
+    def __repr__(self):
+        return '<Q2QService %r@%x>' % (self.debugName, id(self))
+
     def buildProtocol(self, addr):
         p = Q2Q(True)
         p.service = self
@@ -2037,7 +2054,7 @@ class Q2QService(service.MultiService, protocol.ServerFactory):
         return itertools.chain(
             self.appConnectionCache.cachedConnections.itervalues(),
             self.secureConnectionCache.cachedConnections.itervalues(),
-            iter(self.tcpConnections),
+            iter(self.subConnections),
             (self.dispatcher or ()) and self.dispatcher.iterconnections())
 
     def __init__(self, protocolFactoryFactory=None,
@@ -2076,7 +2093,7 @@ class Q2QService(service.MultiService, protocol.ServerFactory):
         self.inboundTCPPortnum = inboundTCPPortnum
 
         # list of independent TCP connections relaying Q2Q traffic.
-        self.tcpConnections = []
+        self.subConnections = []
 
         # map of {(fromAddress, protocolName): [(factory, description)]}
         self.localFactoriesMapping = {}
@@ -2100,18 +2117,12 @@ class Q2QService(service.MultiService, protocol.ServerFactory):
     def _retrievePublicUDPPortNumber(self, registrationServerAddress):
         # Create a PTCP port, bounce some traffic off the indicated server,
         # wait for it to tell us what our address is
-        self._publicPTCPServer = ptcp.Ptcp(self._bootstrapFactory)
-        self._publicUDPPort = reactor.listenUDP(0, self._publicPTCPServer)
-
-        # print 'HELlO'
-
         d = defer.Deferred()
         addressDiscoveryFactory = _AddressDiscoveryFactory(d)
 
-        # print 'connecting to!!!!', addressDiscoveryFactory, registrationServerAddress
-
-        self._publicPTCPServer.connect(addressDiscoveryFactory,
-                                       *registrationServerAddress)
+        host, port = registrationServerAddress
+        self.dispatcher.connectPTCP(host, port, addressDiscoveryFactory,
+                                    self.sharedUDPPortnum)
         return d
 
 
@@ -2153,7 +2164,6 @@ class Q2QService(service.MultiService, protocol.ServerFactory):
                 self._publicUDPAddress = publicAddress
                 return proto.listen(fromAddress, protocolsToFactories.keys(),
                                     serverDescription).addCallback(startup)
-
             pubUDPDeferred.addCallback(_gotPubUDPPort)
             return pubUDPDeferred
 
@@ -2210,20 +2220,6 @@ class Q2QService(service.MultiService, protocol.ServerFactory):
         """
         return self.requestCertificateForAddress(fromAddress, password)
 
-    def protocolAndAuthFromId(self, id, tpt):
-        """(internal)
-
-        Retrieve a waiting connection by its connection identifier, passing in
-        the transport to be used to connect the waiting protocol factory to.
-        """
-        if id in self.inboundConnections:
-            # make the connection?
-            cwait, call = self.inboundConnections.pop(id)
-            # _ConnectionWaiter instance
-            proto = cwait.createProtocolWithTransport(tpt)
-            call.cancel()
-            return proto, cwait.to, cwait.From
-
     _lastConnID = 1
 
     def _nextConnectionID(self, From, to):
@@ -2239,14 +2235,30 @@ class Q2QService(service.MultiService, protocol.ServerFactory):
         """
         listenerID = self._nextConnectionID(From, to)
         call = reactor.callLater(120,
-                                 self.inboundConnections.pop,
-                                 listenerID, None)
+                                 self.unmapListener,
+                                 listenerID)
         expires = Time.fromPOSIXTimestamp(call.getTime())
         self.inboundConnections[listenerID] = (
             _ConnectionWaiter(From, to, protocolName, protocolFactory, isClient),
             call)
         return expires, listenerID
 
+    def unmapListener(self, listenID):
+        del self.inboundConnections[self.listenID]
+
+    def lookupListener(self, listenID):
+        """(internal)
+
+        Retrieve a waiting connection by its connection identifier, passing in
+        the transport to be used to connect the waiting protocol factory to.
+        """
+        if listenID in self.inboundConnections:
+            # make the connection?
+            cwait, call = self.inboundConnections.pop(listenID)
+            # _ConnectionWaiter instance
+            call.cancel()
+            return cwait
+        # raise KeyError(listenID)
 
     def getLocalFactories(self, From, to, protocolName):
         """
@@ -2270,6 +2282,8 @@ class Q2QService(service.MultiService, protocol.ServerFactory):
     udpEnabled = True           # pretty much you never want to turn this off
                                 # except in the unit tests, or in some kind of
                                 # pathological network condition
+
+    virtualEnabled = True
 
     def startService(self):
         self._bootstrapFactory = Q2QBootstrapFactory(self)
@@ -2307,7 +2321,7 @@ class Q2QService(service.MultiService, protocol.ServerFactory):
         dl.append(self.appConnectionCache.shutdown())
         dl.append(self.secureConnectionCache.shutdown())
         dl.append(defer.maybeDeferred(service.MultiService.stopService, self))
-        for conn in self.tcpConnections:
+        for conn in self.subConnections:
             dl.append(defer.maybeDeferred(conn.transport.loseConnection))
         return defer.DeferredList(dl)
 

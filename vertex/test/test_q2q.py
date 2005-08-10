@@ -1,5 +1,5 @@
 # Copyright 2005 Divmod, Inc.  See LICENSE file for details
-# -*- vertex.test.test_q2q -*-
+# -*- vertex.test.test_q2q.UDPConnection -*-
 
 import os
 from cStringIO import StringIO
@@ -274,12 +274,17 @@ class Q2QConnectionTestCase(unittest.TestCase):
     userReverseDNS = 'i.watch.too.much.tv'
     inboundTCPPortnum = 0
     udpEnabled = False
+    virtualEnabled = False
 
     def _makeQ2QService(self, certificateEntity, pff=None):
+        print 'MAKING q2q service for', certificateEntity
         svc = q2q.Q2QService(pff, q2qPortnum=0,
                              inboundTCPPortnum=self.inboundTCPPortnum)
+        svc.udpEnabled = self.udpEnabled
+        svc.virtualEnabled = self.virtualEnabled
         if '@' not in certificateEntity:
             svc.certificateStorage.addPrivateCertificate(certificateEntity)
+        svc.debugName = certificateEntity
         return svc
 
 
@@ -330,6 +335,7 @@ class Q2QConnectionTestCase(unittest.TestCase):
         fakeDNS.addHostPort(
             self.fromDomain, 8788,
             self.serverService2.q2qPort.getHost().port)
+
         fakeDNS.addHostPort(
             self.toDomain, 8788,
             self.serverService.q2qPort.getHost().port)
@@ -376,20 +382,22 @@ class ConnectionTestMixin:
 
     def testListening(self):
 
-        # print 'listening now'
-        
+        print 'listening now'
+
         self.clientServerService = util.wait(self.addClientService(
                 self.toAddress, 'aaaa', self.serverService))
 
-        # print 'listening success'
+        print 'listening success'
 
         ponyFactory = OneTrickPonyServerFactory()
+        print 'creating factory'
         ponged = defer.Deferred()
+        print 'ponged'
         util.wait(self.clientServerService.listenQ2Q(self.toAddress,
                                                 {'pony2': ponyFactory},
                                                 'ponies suck'))
 
-        # print 'really success listening'
+        print 'really success listening'
 
         self.clientClientService = util.wait(self.addClientService(
                 self.fromAddress, 'bbbb', self.serverService2))
@@ -399,14 +407,15 @@ class ConnectionTestMixin:
                                             'pony2',
                                             otpcf)
 
-        # print 'no way we get here'
+        print 'no way we get here'
         answerBox = util.wait(ponged)
 
         T = otpcf.proto.transport
         self.assertEquals(T.getQ2QPeer(), self.toAddress)
         self.assertEquals(T.getQ2QHost(), self.fromAddress)
-
+        print 'tricked?'
         self.failUnless('tricked' in answerBox)
+        print 'tricked.'
 
     def testChooserGetsThreeChoices(self):
         ponyFactory = OneTrickPonyServerFactory()
@@ -482,11 +491,13 @@ class ConnectionTestMixin:
         # XXX currently there are 2 connections but there should only be 1: the
         # connection cache is busted, need a separate test for that
         for liveConnection in self.serverService.iterconnections():
-            liveConnection.transport.stopReading()
+            print 'PAUSING', liveConnection.transport, liveConnection
+            liveConnection.transport.pauseProducing()
         wfc = self.dataEater.waitForCount(SIZE * 2)
-        self.assertRaises(defer.TimeoutError, util.wait, wfc, timeout=2)
+        self.assertRaises(defer.TimeoutError, util.wait, wfc, timeout=10)
         for liveConnection in self.serverService.iterconnections():
-            liveConnection.transport.startReading()
+            print 'RESUMING', liveConnection.transport, liveConnection
+            liveConnection.transport.resumeProducing()
         util.wait(self.dataEater.waitForCount(SIZE * 2), 30)
         self.failUnless(self.streamer.pauseCount > 0)
         self.failUnless(self.streamer.resumeCount > 0)
@@ -566,9 +577,12 @@ class ConnectionTestMixin:
             ErroneousClientFactory())
 
         def connected(proto):
+            print 'CONNECTED'
             def trapit(what):
+                print 'TRAPPED', what
                 what.trap(juice.UnhandledRemoteJuiceError)
             Break().do(proto).addCallbacks(self.successIsFailure, trapit)
+            print 'called Break'
             return Flag().do(proto)
         def err(x):
             x.trap(ConnectionDone)
@@ -584,6 +598,7 @@ class ConnectionTestMixin:
 class VirtualConnection(Q2QConnectionTestCase, ConnectionTestMixin):
     inboundTCPPortnum = None
     udpEnabled = False
+    virtualEnabled = True
 
     def testListening(self):
         pass
@@ -598,10 +613,12 @@ class UDPConnection(Q2QConnectionTestCase, ConnectionTestMixin):
     # skip = 'yep'
     inboundTCPPortnum = None
     udpEnabled = True
+    virtualEnabled = False
 
 class TCPConnection(Q2QConnectionTestCase, ConnectionTestMixin):
     inboundTCPPortnum = 0
     udpEnabled = False
+    virtualEnabled = False
 
 class TestProtocol(juice.Juice):
     def juice_GETADDRESSINFO(self, request):

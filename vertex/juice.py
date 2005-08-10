@@ -616,7 +616,11 @@ class Command:
         forgotten = []
 
     def makeResponse(cls, objects, proto):
-        return objectsToStrings(objects, cls.response, cls.responseType(), proto)
+        try:
+            return objectsToStrings(objects, cls.response, cls.responseType(), proto)
+        except:
+            log.msg("Exception in %r.makeResponse" % (cls,))
+            raise
     makeResponse = classmethod(makeResponse)
 
     def do(self, proto, namespace=None, requiresAnswer=True):
@@ -723,6 +727,9 @@ class Juice(LineReceiver, JuiceParserBase):
         """
         JuiceParserBase.__init__(self)
         self._issueGreeting = issueGreeting
+
+    def __repr__(self):
+        return '<%s %s/%s at 0x%x>' % (self.__class__.__name__, self.isClient and 'client' or 'server', self.innerProtocol, id(self))
 
     __locked = False
 
