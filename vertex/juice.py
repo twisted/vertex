@@ -759,7 +759,7 @@ class Juice(LineReceiver, JuiceParserBase):
 
     def juiceBoxReceived(self, box):
         if self.__locked and COMMAND in box and ASK in box:
-            # This is a command which will trigger an ansewr, and we can no
+            # This is a command which will trigger an answer, and we can no
             # longer answer anything, so don't bother delivering it.
             return
         return super(Juice, self).juiceBoxReceived(box)
@@ -771,7 +771,10 @@ class Juice(LineReceiver, JuiceParserBase):
         Note: transport.write is never called outside of this method.
         """
         assert not self.__locked, "You cannot send juice packets when a connection is locked"
-        self.transport.write(completeBox.serialize())
+        if self._startingTLSBuffer is not None:
+            self._startingTLSBuffer.append(completeBox)
+        else:
+            self.transport.write(completeBox.serialize())
 
     def sendCommand(self, command, __content='', __answer=True, **kw):
         box = JuiceBox(__content, **kw)
@@ -791,15 +794,25 @@ class Juice(LineReceiver, JuiceParserBase):
         # lines below in startTLS for details.  --glyph
         LineReceiver.makeConnection(self, transport)
 
+    _startingTLSBuffer = None
+
+    def prepareTLS(self):
+        self._startingTLSBuffer = []
+
     def startTLS(self, certificate, *verifyAuthorities):
         if self.hostCertificate is None:
             self.hostCertificate = certificate
             self._justStartedTLS = True
             self.transport.startTLS(certificate.options(*verifyAuthorities))
-            self._sslVerifyProblems = problemsFromTransport(self.transport)
-            # ^ Remember that mutable list that we were just talking about?
-            # Here it is.  sslverify.py takes care of populating this list as
+            # Remember that mutable list that we were just talking about?  Here
+            # it is.  sslverify.py takes care of populating this list as
             # necessary. --glyph
+            self._sslVerifyProblems = problemsFromTransport(self.transport)
+            stlsb = self._startingTLSBuffer
+            if stlsb is not None:
+                self._startingTLSBuffer = None
+                for box in stlsb:
+                    self.sendPacket(box)
         else:
             raise RuntimeError(
                 "Previously authenticated connection between %s and %s "

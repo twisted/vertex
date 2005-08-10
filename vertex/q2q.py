@@ -1,4 +1,4 @@
-# -*- test-case-name: vertex.test.test_q2q.UDPConnection -*-
+# -*- test-case-name: vertex.test.test_q2q -*-
 # Copyright 2005 Divmod, Inc.  See LICENSE file for details
 
 # stdlib
@@ -532,6 +532,11 @@ class Secure(juice.Command):
     def makeResponse(cls, objects, proto):
         return juice.TLSBox(*objects)
     makeResponse = classmethod(makeResponse)
+
+    def do(self, proto, namespace=None, requiresAnswer=True):
+        d = juice.Command.do(self, proto, namespace, requiresAnswer)
+        proto.prepareTLS()
+        return d
 
 
 class Listen(juice.Command):
