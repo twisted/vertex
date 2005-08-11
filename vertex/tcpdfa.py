@@ -22,7 +22,6 @@ SYN = 'SYN'
 ACK = 'ACK'
 SYN_ACK = 'SYN_ACK'
 FIN = 'FIN'
-FIN_ACK = 'FIN_ACK'
 RST = 'RST'
 
 # Application vocabulary
@@ -63,7 +62,6 @@ class TCP(StateMachine):
         ESTABLISHED: {
             APP_CLOSE: (FIN, FIN_WAIT_1),
             FIN: (ACK, CLOSE_WAIT),
-            ACK: (NOTHING, ESTABLISHED),
             TIMEOUT: (NOTHING, BROKEN),
             },
         CLOSE_WAIT: {
@@ -77,7 +75,7 @@ class TCP(StateMachine):
         FIN_WAIT_1: {
             ACK: (NOTHING, FIN_WAIT_2),
             FIN: (ACK, CLOSING),
-            FIN_ACK: (ACK, TIME_WAIT),
+            # FIN_ACK: (ACK, TIME_WAIT),
             TIMEOUT: (NOTHING, BROKEN),
             },
         FIN_WAIT_2: {

@@ -9,7 +9,7 @@ import struct
 from zope.interface import implements
 
 # twisted
-from twisted.internet import reactor, defer, interfaces, protocol
+from twisted.internet import reactor, defer, interfaces, protocol, error
 from twisted.internet.main import CONNECTION_DONE
 from twisted.python import log
 from twisted.python.failure import Failure
@@ -1434,6 +1434,12 @@ class Q2Q(juice.Juice, subproducer.SuperProducer):
         d = FOOCBDeferredList(attemptDeferreds,
                               fireOnOneCallback=True,
                               fireOnOneErrback=False)
+        def dontLogThat(e):
+            e.trap(error.ConnectionLost, error.ConnectionDone)
+
+        for attDef in attemptDeferreds:
+            attDef.addErrback(dontLogThat)
+
         def gotResults(results):
             theResult = None
             anyResult = False
