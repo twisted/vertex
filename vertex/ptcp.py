@@ -5,6 +5,7 @@ import struct, zlib
 import random
 
 from twisted.internet import protocol, error, reactor, defer
+from twisted.internet.main import CONNECTION_DONE
 from twisted.python import log, util
 
 from vertex import tcpdfa
@@ -656,7 +657,7 @@ class PtcpConnection(tcpdfa.TCP):
     def exit_ESTABLISHED(self):
         self.disconnected = True
         try:
-            self.protocol.connectionLost(error.ConnectionDone())
+            self.protocol.connectionLost(CONNECTION_DONE)
         except:
             log.err()
         self.protocol = None
