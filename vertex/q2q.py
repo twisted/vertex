@@ -853,7 +853,7 @@ class Q2Q(juice.Juice, subproducer.SuperProducer):
         for (listener, listenCert, desc
                  ) in lcget:
             # print 'looking at listener', listener
-            print listener.transport.getPeer().host, srchost
+            # print listener.transport.getPeer().host, srchost
             if listener.transport.getPeer().host == srchost:
                 # print 'bound in clients loop'
 

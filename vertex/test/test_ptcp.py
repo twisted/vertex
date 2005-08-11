@@ -74,10 +74,17 @@ class TestProducerProtocol(protocol.Protocol):
             self.transport.unregisterProducer()
 
 class PtcpTransportTestCase(unittest.TestCase):
+    def setUpClass(self):
+        ptcp.PtcpConnection._retransmitTimeout /= 10
+
+    def tearDownClass(self):
+        ptcp.PtcpConnection._retransmitTimeout *= 10
+
     def setUpForATest(self,
                       ServerProtocol=TestProtocol, ClientProtocol=TestProtocol):
         serverProto = ServerProtocol()
         clientProto = ClientProtocol()
+
 
         self.serverProto = serverProto
         self.clientProto = clientProto
@@ -241,7 +248,7 @@ class PtcpTransportTestCase(unittest.TestCase):
             # The server must write enough to completely fill the outgoing buffer,
             # since our peer isn't ACKing /anything/ and our server waits for
             # writes to be acked before proceeding.
-            serverProto.WRITE_SIZE = serverProto.transport.sendWindow * 2
+            serverProto.WRITE_SIZE = serverProto.transport.sendWindow * 5
 
             # print 'Connected'
             clientProto.transport.pauseProducing()
@@ -255,7 +262,7 @@ class PtcpTransportTestCase(unittest.TestCase):
 
 def randomLossy(method):
     def worseMethod(*a, **kw):
-        if random.choice((True, False, False)):
+        if random.choice((True, True, False)):
             method(*a, **kw)
     return worseMethod
 

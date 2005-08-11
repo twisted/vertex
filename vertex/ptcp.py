@@ -275,11 +275,11 @@ class PtcpConnection(tcpdfa.TCP):
 
     """
 
-    mtu = 16384
+    mtu = 512 - _fixedSize
 
     recvWindow = mtu
     sendWindow = mtu
-    sendWindowRemaining = mtu
+    sendWindowRemaining = mtu * 2
 
     protocol = None
 
@@ -307,6 +307,8 @@ class PtcpConnection(tcpdfa.TCP):
     def packetReceived(self, packet):
         # XXX TODO: probably have to do something to the packet here to
         # identify its relative sequence number.
+
+        # print 'received', self, packet
 
         if packet.stb:
             # Shrink the MTU
@@ -498,7 +500,7 @@ class PtcpConnection(tcpdfa.TCP):
                 self._originateOneData()
 
     _retransmitter = None
-    _retransmitTimeout = 0.05
+    _retransmitTimeout = 0.5
 
     def _retransmitLater(self):
         if self._retransmitter is None:
@@ -745,6 +747,7 @@ class Ptcp(protocol.DatagramProtocol):
         return sourcePseudoPort
 
     def sendPacket(self, packet):
+        # print 'send', packet
         self.transport.write(packet.encode(), packet.destination)
 
 
