@@ -11,7 +11,17 @@ from twisted.python import log, util
 from vertex import tcpdfa
 from vertex.statemachine import StateError
 
-_packetFormat = '!4LBlH'
+_packetFormat = ('!' # WTF did you think
+                 'H' # sourcePseudoPort
+                 'H' # destPseudoPort
+                 'L' # sequenceNumber
+                 'L' # acknowledgementNumber
+                 'L' # window
+                 'B' # flags
+                 'l' # checksum
+                     # (signed because of crc32 module)
+                 'H' # dlen
+                 )
 _fixedSize = struct.calcsize(_packetFormat)
 
 _SYN, _ACK, _FIN, _RST, _STB = [1 << n for n in range(5)]
@@ -39,7 +49,8 @@ def relativeSequence(wireSequence, initialSequence, lapNumber):
 
 class PtcpPacket(util.FancyStrMixin, object):
     showAttributes = (
-        ('connID', 'connID', '%d'),
+        ('sourcePseudoPort', 'sourcePseudoPort', '%d'),
+        ('destPseudoPort', 'destPseudoPort', '%d'),
         ('shortdata', 'data', '%r'),
         ('niceflags', 'flags', '%s'),
         ('dlen', 'dlen', '%d'),
@@ -75,12 +86,15 @@ class PtcpPacket(util.FancyStrMixin, object):
         return get,
     niceflags = property(*niceflags())
 
-    def create(cls, connID, seqNum, ackNum, data,
-                  window=(1 << 15),
-                  syn=False, ack=False, fin=False,
-                  rst=False, stb=False,
-                  destination=None):
-        i = cls(connID, seqNum, ackNum, window,
+    def create(cls,
+               sourcePseudoPort, destPseudoPort,
+               seqNum, ackNum, data,
+               window=(1 << 15),
+               syn=False, ack=False, fin=False,
+               rst=False, stb=False,
+               destination=None):
+        i = cls(sourcePseudoPort, destPseudoPort,
+                seqNum, ackNum, window,
                 0, 0, len(data), data)
         i.syn = syn
         i.ack = ack
@@ -93,10 +107,14 @@ class PtcpPacket(util.FancyStrMixin, object):
     create = classmethod(create)
 
 
-    def __init__(self, connID, seqNum, ackNum, window, flags,
+    def __init__(self,
+                 sourcePseudoPort,
+                 destPseudoPort,
+                 seqNum, ackNum, window, flags,
                  checksum, dlen, data, peerAddressTuple=None,
                  seqOffset=0, ackOffset=0, seqLaps=0, ackLaps=0):
-        self.connID = connID
+        self.sourcePseudoPort = sourcePseudoPort
+        self.destPseudoPort = destPseudoPort
         self.seqNum = seqNum
         self.ackNum = ackNum
         self.window = window
@@ -133,9 +151,9 @@ class PtcpPacket(util.FancyStrMixin, object):
 
     def decode(cls, bytes, hostPortPair):
         fields = struct.unpack(_packetFormat, bytes[:_fixedSize])
-        connID, seq, ack, window, flags, checksum, dlen = fields
+        sourcePseudoPort, destPseudoPort, seq, ack, window, flags, checksum, dlen = fields
         data = bytes[_fixedSize:]
-        return cls(connID, seq, ack, window, flags,
+        return cls(sourcePseudoPort, destPseudoPort, seq, ack, window, flags,
                    checksum, dlen, data, hostPortPair)
     decode = classmethod(decode)
 
@@ -151,7 +169,8 @@ class PtcpPacket(util.FancyStrMixin, object):
         checksum = self.computeChecksum()
         return struct.pack(
             _packetFormat,
-            self.connID, self.seqNum, self.ackNum, self.window,
+            self.sourcePseudoPort, self.destPseudoPort,
+            self.seqNum, self.ackNum, self.window,
             self.flags, checksum, dlen) + self.data
 
     def fragment(self, mtu):
@@ -162,7 +181,8 @@ class PtcpPacket(util.FancyStrMixin, object):
         L = []
         # XXX TODO: need to take seqLaps into account, etc.
         for chunk in iterchunks(self.data, mtu):
-            last = self.create(self.connID,
+            last = self.create(self.sourcePseudoPort,
+                               self.destPseudoPort,
                                self.seqNum + seqOfft,
                                self.ackNum,
                                chunk,
@@ -263,9 +283,12 @@ class PtcpConnection(tcpdfa.TCP):
 
     protocol = None
 
-    def __init__(self, connID, ptcp, factory, peerAddressTuple):
+    def __init__(self,
+                 hostPseudoPort, peerPseudoPort,
+                 ptcp, factory, peerAddressTuple):
         tcpdfa.TCP.__init__(self)
-        self.connID = connID
+        self.hostPseudoPort = hostPseudoPort
+        self.peerPseudoPort = peerPseudoPort
         self.ptcp = ptcp
         self.factory = factory
         self._receiveBuffer = []
@@ -296,9 +319,6 @@ class PtcpConnection(tcpdfa.TCP):
 
         if self._paused:
             return
-        else:
-            pass
-            # print 'NOT dropping', packet, self
 
         generatedStateMachineInput = False
         if packet.syn:
@@ -420,11 +440,12 @@ class PtcpConnection(tcpdfa.TCP):
             usefulData = packet.data[self.nextRecvSeqNum - packet.relativeSeq():]
             # DONT check/slice the window size here, the acceptability code
             # checked it, we can over-ack if the other side is buggy (???)
-            try:
-                self.protocol.dataReceived(usefulData)
-            except:
-                log.err()
-                self.loseConnection()
+            if self.protocol is not None:
+                try:
+                    self.protocol.dataReceived(usefulData)
+                except:
+                    log.err()
+                    self.loseConnection()
 
         self.nextRecvSeqNum += packet.segmentLength()
         if self.state == tcpdfa.ESTABLISHED:
@@ -440,7 +461,8 @@ class PtcpConnection(tcpdfa.TCP):
         return self.transport.getHost()
 
     def getPeer(self):
-        return PtcpAddress(self.peerAddressTuple, self.connID)
+        return PtcpAddress(self.peerAddressTuple,
+                           self.pseudoPortPair)
 
     _outgoingBytes = ''
     _nagle = None
@@ -568,7 +590,14 @@ class PtcpConnection(tcpdfa.TCP):
         return (self.nextRecvSeqNum + self.peerSendISN) % (2**32)
 
     def originate(self, data='', syn=False, ack=False, fin=False):
-        p = PtcpPacket.create(self.connID,
+        if syn:
+            # We really should be randomizing the ISN but until we finish the
+            # implementations of the various bits of wraparound logic that were
+            # started with relativeSequence
+            assert self.nextSendSeqNum == 0
+            assert self.hostSendISN == 0
+        p = PtcpPacket.create(self.hostPseudoPort,
+                              self.peerPseudoPort,
                               seqNum=(self.nextSendSeqNum + self.hostSendISN) % (2**32),
                               ackNum=self.currentAckNum(),
                               data=data,
@@ -599,7 +628,7 @@ class PtcpConnection(tcpdfa.TCP):
         self.ptcp.sendPacket(p)
 
     def stopListening(self):
-        del self.ptcp._connections[self.connID]
+        del self.ptcp._connections[self.sourcePseudoPort]
 
     # State machine transition definitions, hooray.
     def transition_SYN_SENT_to_CLOSED(self):
@@ -621,7 +650,7 @@ class PtcpConnection(tcpdfa.TCP):
         self._stopRetransmitting()
 
     def enter_TIME_WAIT(self):
-        del self.ptcp._connections[self.connID]
+        del self.ptcp._connections[self.sourcePseudoPort]
         for dcall in self._nagle, self._retransmitter:
             if dcall is not None:
                 dcall.cancel()
@@ -635,8 +664,15 @@ class PtcpConnection(tcpdfa.TCP):
         """
         raise StateError("You can't write anything until someone connects to you.")
 
-    def invalidInput(self, datum):
-        print self, self.protocol, 'invalid input', datum
+#     def invalidInput(self, datum):
+#         print self, self.protocol, 'invalid input', datum
+
+    def pseudoPortPair():
+        def get(self):
+            return (self.hostPseudoPort,
+                    self.peerPseudoPort)
+        return get,
+    pseudoPortPair = property(*pseudoPortPair())
 
     def enter_ESTABLISHED(self):
         """
@@ -645,7 +681,7 @@ class PtcpConnection(tcpdfa.TCP):
         """
         try:
             p = self.factory.buildProtocol(PtcpAddress(
-                    self.peerAddressTuple, self.connID))
+                    self.peerAddressTuple, self.pseudoPortPair))
             p.makeConnection(self)
         except:
             log.msg("Exception during Ptcp connection setup.")
@@ -677,17 +713,22 @@ class PtcpConnection(tcpdfa.TCP):
 class PtcpAddress(object):
     # garbage
 
-    def __init__(self, (host, port), connid):
+    def __init__(self, (host, port), (pseudoHostPort, pseudoPeerPort)):
         self.host = host
         self.port = port
-        self.connid = connid
+        self.pseudoHostPort = pseudoHostPort
+        self.pseudoPeerPort = pseudoPeerPort
 
     def __repr__(self):
-        return 'PtcpAddress((%r, %r), %r)' % (
-            self.host, self.port, self.connid)
+        return 'PtcpAddress((%r, %r), (%r, %r)' % (
+            self.host, self.port,
+            self.pseudoHostPort,
+            self.pseudoPeerPort)
 
+import itertools
+genConnID = itertools.count(8).next
 
-
+MAX_PSEUDO_PORT = (2 ** 16)
 
 class Ptcp(protocol.DatagramProtocol):
     # External API
@@ -695,15 +736,13 @@ class Ptcp(protocol.DatagramProtocol):
     def __init__(self, factory):
         self.factory = factory
 
-    def connect(self, factory, host, port):
-        self._lastConnID += 5 # random.randrange(2 ** 32)
-        self._lastConnID %= 2 ** (struct.calcsize('L') * 8)
-        connID = self._lastConnID
-        conn = self._connections[(connID, (host, port))
+    def connect(self, factory, host, port, pseudoPort=1):
+        sourcePseudoPort = genConnID() % MAX_PSEUDO_PORT
+        conn = self._connections[(pseudoPort, sourcePseudoPort, (host, port))
                                  ] = PtcpConnection(
-            connID, self, factory, (host, port))
+            sourcePseudoPort, pseudoPort, self, factory, (host, port))
         conn.input(tcpdfa.APP_ACTIVE_OPEN)
-        return connID
+        return sourcePseudoPort
 
     def sendPacket(self, packet):
         self.transport.write(packet.encode(), packet.destination)
@@ -731,7 +770,8 @@ class Ptcp(protocol.DatagramProtocol):
         if pkt.dlen > len(pkt.data):
             self.sendPacket(
                 PtcpPacket.create(
-                    pkt.connID,
+                    pkt.destPseudoPort,
+                    pkt.sourcePseudoPort,
                     0,
                     0,
                     struct.pack('!H', len(pkt.data)),
@@ -746,17 +786,20 @@ class Ptcp(protocol.DatagramProtocol):
             self.packetReceived(pkt)
 
     def packetReceived(self, packet):
-        packey = (packet.connID, packet.peerAddressTuple)
+        packey = (packet.sourcePseudoPort, packet.destPseudoPort, packet.peerAddressTuple)
         if packey not in self._connections:
-            if packet.flags == _SYN: # SYN and _ONLY_ SYN set.
-                conn = PtcpConnection(packet.connID, self,
+            if packet.flags == _SYN and packet.destPseudoPort == 1: # SYN and _ONLY_ SYN set.
+                conn = PtcpConnection(packet.destPseudoPort,
+                                      packet.sourcePseudoPort, self,
                                       self.factory, packet.peerAddressTuple)
                 conn.input(tcpdfa.APP_PASSIVE_OPEN)
                 self._connections[packey] = conn
             else:
-                # it was just a NAT packet, probably, but --
-                if packet.connID != 0 or packet.flags:
-                    log.msg("corrupted packet? %r" % (packet,))
+                log.msg("corrupted packet? %r %r %r" % (packet,packey, self._connections))
                 return
-        self._connections[packey].packetReceived(packet)
-
+        try:
+            self._connections[packey].packetReceived(packet)
+        except:
+            log.msg("PtcpConnection error on %r:" % (packet,))
+            log.err()
+            del self._connections[packey]

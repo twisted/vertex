@@ -47,7 +47,7 @@ class TCP(StateMachine):
             TIMEOUT: (NOTHING, CLOSED),
             APP_CLOSE: (NOTHING, CLOSED),
             SYN_ACK: (ACK, ESTABLISHED),
-            SYN: (SYN_ACK, SYN_RCVD),
+            # SYN: (SYN_ACK, SYN_RCVD),
             },
         SYN_RCVD: {
             ACK: (NOTHING, ESTABLISHED),

@@ -248,7 +248,7 @@ class Q2QReceive(Options):
         serv.listenQ2Q(self.parent.getFrom(),
                        {'file-transfer': FileReceiverFactory(self)},
                        "simple file transfer test").addCallback(pr).addErrback(stopit)
-        self.parent.start(4321)
+        self.parent.start()
 
 class Q2QSend(Options):
 

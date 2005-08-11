@@ -1999,7 +1999,7 @@ class PTCPConnectionDispatcher(object):
         else:
             assert sourcePort != 0
         p, proto = self._ports[sourcePort]
-        proto.sendPacket(ptcp.PtcpPacket.create(0, 0, 0, '', destination=(host, port)))
+        p.write('NAT!', (host, port))
         return sourcePort
 
     def bindNewPort(self, portNum=0):
@@ -2291,9 +2291,9 @@ class Q2QService(service.MultiService, protocol.ServerFactory):
     dispatcher = None
     sharedUDPPortnum = None
 
-    udpEnabled = True           # pretty much you never want to turn this off
-                                # except in the unit tests, or in some kind of
-                                # pathological network condition
+    udpEnabled = True          # pretty much you never want to turn this off
+                               # except in the unit tests, or in some kind of
+                               # pathological network condition
 
     virtualEnabled = True
 
