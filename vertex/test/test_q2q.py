@@ -277,7 +277,6 @@ class Q2QConnectionTestCase(unittest.TestCase):
     virtualEnabled = False
 
     def _makeQ2QService(self, certificateEntity, pff=None):
-        print 'MAKING q2q service for', certificateEntity
         svc = q2q.Q2QService(pff, q2qPortnum=0,
                              inboundTCPPortnum=self.inboundTCPPortnum)
         svc.udpEnabled = self.udpEnabled
@@ -382,22 +381,16 @@ class ConnectionTestMixin:
 
     def testListening(self):
 
-        print 'listening now'
-
         self.clientServerService = util.wait(self.addClientService(
                 self.toAddress, 'aaaa', self.serverService))
 
-        print 'listening success'
 
         ponyFactory = OneTrickPonyServerFactory()
-        print 'creating factory'
         ponged = defer.Deferred()
-        print 'ponged'
         util.wait(self.clientServerService.listenQ2Q(self.toAddress,
                                                 {'pony2': ponyFactory},
                                                 'ponies suck'))
 
-        print 'really success listening'
 
         self.clientClientService = util.wait(self.addClientService(
                 self.fromAddress, 'bbbb', self.serverService2))
@@ -407,15 +400,12 @@ class ConnectionTestMixin:
                                             'pony2',
                                             otpcf)
 
-        print 'no way we get here'
         answerBox = util.wait(ponged)
 
         T = otpcf.proto.transport
         self.assertEquals(T.getQ2QPeer(), self.toAddress)
         self.assertEquals(T.getQ2QHost(), self.fromAddress)
-        print 'tricked?'
         self.failUnless('tricked' in answerBox)
-        print 'tricked.'
 
     def testChooserGetsThreeChoices(self):
         ponyFactory = OneTrickPonyServerFactory()
@@ -491,12 +481,10 @@ class ConnectionTestMixin:
         # XXX currently there are 2 connections but there should only be 1: the
         # connection cache is busted, need a separate test for that
         for liveConnection in self.serverService.iterconnections():
-            print 'PAUSING', liveConnection.transport, liveConnection
             liveConnection.transport.pauseProducing()
         wfc = self.dataEater.waitForCount(SIZE * 2)
         self.assertRaises(defer.TimeoutError, util.wait, wfc, timeout=3)
         for liveConnection in self.serverService.iterconnections():
-            print 'RESUMING', liveConnection.transport, liveConnection
             liveConnection.transport.resumeProducing()
         util.wait(self.dataEater.waitForCount(SIZE * 2), 30)
         self.failUnless(self.streamer.pauseCount > 0)
@@ -562,7 +550,6 @@ class ConnectionTestMixin:
         def connected(proto):
             return EngenderError().do(proto)
         def exploded(err):
-            print 'lalala want conn done, got', err
             err.trap(ConnectionDone)
         d.addCallback(connected)
         d.addCallbacks(self.successIsFailure, exploded)
@@ -578,12 +565,9 @@ class ConnectionTestMixin:
             ErroneousClientFactory())
 
         def connected(proto):
-            print 'CONNECTED'
             def trapit(what):
-                print 'TRAPPED', what
                 what.trap(juice.UnhandledRemoteJuiceError)
             Break().do(proto).addCallbacks(self.successIsFailure, trapit)
-            print 'called Break'
             return Flag().do(proto)
         def err(x):
             x.trap(ConnectionDone)
