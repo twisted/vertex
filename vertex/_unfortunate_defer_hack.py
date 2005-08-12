@@ -1,6 +1,12 @@
 
 
-from twisted.internet.defer import Deferred, FirstError
+from twisted.internet.defer import Deferred
+try:
+    from twisted.internet.defer import FirstError
+except:
+    class FirstError(Exception):
+        """omgwtf
+        """
 from twisted.python import failure
 
 class NoFailure(Exception):
