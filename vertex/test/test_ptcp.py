@@ -284,6 +284,6 @@ def insufficientTransmitter(method,  mtu):
 class SmallMTUTransportTestCase(PtcpTransportTestCase):
     def setUpForATest(self, *a, **kw):
         results = PtcpTransportTestCase.setUpForATest(self, *a, **kw)
-        results[-2].write = insufficientTransmitter(results[-2].write, 512)
-        results[-1].write = insufficientTransmitter(results[-1].write, 512)
+        results[-2].write = insufficientTransmitter(results[-2].write, 128)
+        results[-1].write = insufficientTransmitter(results[-1].write, 128)
         return results
