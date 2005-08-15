@@ -809,6 +809,7 @@ class Q2Q(juice.Juice, subproducer.SuperProducer):
         self.listeningClient = []
         self.connectionObservers = []
         if self.service.publicIP is None:
+            log.msg("Service has no public IP: determining")
             self.service.publicIP = self.transport.getHost().host
             self.service._publicIPIsReallyPrivate = True
             def rememberPublicIP(pubip):
@@ -1953,12 +1954,13 @@ class YourAddress(juice.Command):
         ]
 
 
-class AddressDiscoveryProtocol(juice.Juice):
+class AddressDiscoveryProtocol(Q2QBootstrap):
     def __init__(self, addrDiscDef):
+        Q2QBootstrap.__init__(self, False)
         self.addrDiscDef = addrDiscDef
 
     def connectionMade(self):
-        WhoAmI().do(self).chainDeferred(self.addrDiscDef)
+        self.whoami().chainDeferred(self.addrDiscDef)
 
     def connectionLost(self, reason):
         if self.addrDiscDef is not None:
@@ -2256,7 +2258,7 @@ class Q2QService(service.MultiService, protocol.ServerFactory):
         return expires, listenerID
 
     def unmapListener(self, listenID):
-        del self.inboundConnections[self.listenID]
+        del self.inboundConnections[listenID]
 
     def lookupListener(self, listenID):
         """(internal)
