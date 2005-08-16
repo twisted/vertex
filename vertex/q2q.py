@@ -225,6 +225,7 @@ class Q2QClientProtocolFactoryWrapper:
 
     myClient = None
     def setMyClient(self, myClient):
+        print '***CLIENT SET***', self, self.fromAddress, self.toAddress, self.cpf
         self.myClient = myClient
         return myClient
 
@@ -239,7 +240,11 @@ class Q2QClientProtocolFactoryWrapper:
     def clientConnectionFailed(self, connector, reason):
         # DON'T forward this to our client protocol factory; only one attempt
         # has failed; let that happen later, when _ALL_ attempts have failed.
+        print 'client connection failing...'
+        assert self.myClient is None
+        print 'assert passed'
         self.connectionEstablishedDeferred.errback(reason)
+        print 'deferred errbacked'
 
     def clientConnectionLost(self, connector, reason):
         # as in clientConnectionFailed, don't bother to forward; this
@@ -331,7 +336,10 @@ class AbstractConnectionAttempt(protocol.ClientFactory):
 
 
 class TCPConnectionAttempt(AbstractConnectionAttempt):
+    attempted = False
     def startAttempt(self):
+        assert not self.attempted
+        self.attempted = True
         reactor.connectTCP(self.method.host, self.method.port, self)
         return self.deferred
 
@@ -358,7 +366,10 @@ connectionCounter = itertools.count().next
 connectionCounter()
 
 class VirtualConnectionAttempt(AbstractConnectionAttempt):
+    attempted = False
     def startAttempt(self):
+        assert not self.attempted
+        self.attempted = True
         cid = connectionCounter()
         if self.q2qproto.isServer:
             cid = -cid
@@ -388,7 +399,10 @@ class VirtualMethod:
 
 
 class _PTCPConnectionAttempt1NoPress(AbstractConnectionAttempt):
+    attempted = False
     def startAttempt(self):
+        assert not self.attempted
+        self.attempted = True
         svc = self.q2qproto.service
         dsp = svc.dispatcher
         dsp.connectPTCP(
@@ -397,7 +411,11 @@ class _PTCPConnectionAttempt1NoPress(AbstractConnectionAttempt):
         return self.deferred
 
 class _PTCPConnectionAttemptPress(AbstractConnectionAttempt):
+    attempted = False
     def startAttempt(self):
+        assert not self.attempted
+        self.attempted = True
+
         svc = self.q2qproto.service
         dsp = svc.dispatcher
         newPort = self.newPort = dsp.bindNewPort()
@@ -424,7 +442,11 @@ class PTCPMethod(TCPMethod):
                 _PTCPConnectionAttemptPress(self, *a)]
 
 class RPTCPConnectionAttempt(AbstractConnectionAttempt):
+    attempted = False
     def startAttempt(self):
+        assert not self.attempted
+        self.attempted = True
+
         realLocalUDP = self.newPort = self.q2qproto.service.dispatcher.seedNAT((self.method.host, self.method.port))
         # self.host and self.port are remote host and port
         # realLocalUDP is a local port
@@ -819,6 +841,8 @@ class Q2Q(juice.Juice, subproducer.SuperProducer):
                 self.service.publicIP = ip
                 self.service._publicIPIsReallyPrivate = False
             SourceIP().do(self).addCallback(rememberPublicIP)
+        else:
+            log.msg("Using existing public IP: %r" % (self.service.publicIP,))
 
     def connectionLost(self, reason):
         ""
@@ -1606,12 +1630,16 @@ class SeparateConnectionTransport(object):
         self.transport.unregisterProducer()
 
     def loseConnection(self):
+        print 'losing separate connection'
         self.transport.loseConnection()
 
     def connectionLost(self, reason):
+        print 'separate connection connection lost'
         self.service.subConnections.remove(self)
         if self.subProtocol is not None:
+            print 'sub protocol connection lost', self.subProtocol
             self.subProtocol.connectionLost(reason)
+            self.subProtocol = None
 
 class WhoAmI(juice.Command):
     commandName = 'Who-Am-I'
@@ -1643,6 +1671,7 @@ class Q2QBootstrap(juice.Juice):
             self.retrieveConnection(self.connIdentifier, self.protoFactory).addErrback(trapKeyError)
 
     def connectionLost(self, reason):
+        print 'q2q bootstrap connection lost: upcalling'
         juice.Juice.connectionLost(self, reason)
         if self.protoFactory is not None:
             if self.innerProtocol is not None:
@@ -1906,7 +1935,12 @@ class DirectoryCertificateStore(DefaultCertificateStore):
         self.localStore = _pemmap(os.path.join(filepath, 'private'),
                                   sslverify.PrivateCertificate)
 
+class MessageSender(juice.Juice):
+    """
+    """
+
 theMessageFactory = juice.JuiceClientFactory()
+theMessageFactory.protocol = MessageSender
 
 class _MessageChannel(object):
     """Conceptual curry over source and destination addresses, as well as a namespace.
@@ -2075,7 +2109,8 @@ class Q2QService(service.MultiService, protocol.ServerFactory):
                  certificateStorage=None, wrapper=None,
                  q2qPortnum=port,
                  inboundTCPPortnum=None,
-                 publicIP=None):
+                 publicIP=None,
+                 udpEnabled=None):
         """
 
         @param protocolFactoryFactory: A callable of three arguments
@@ -2086,6 +2121,10 @@ class Q2QService(service.MultiService, protocol.ServerFactory):
         @param certificateStorage: an implementor of ICertificateStore, or None
         for the default implementation.
         """
+
+        if udpEnabled is not None:
+            self.udpEnabled = udpEnabled
+
         if protocolFactoryFactory is None:
             protocolFactoryFactory = _noResults
         self.protocolFactoryFactory = protocolFactoryFactory

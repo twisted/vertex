@@ -673,7 +673,10 @@ class ProtocolSwitchCommand(Command):
         def die(ign):
             proto.transport.loseConnection()
             return ign
-        return d.addCallback(switchNow).addErrback(die)
+        def handle(ign):
+            self.protoToSwitchToFactory.clientConnectionFailed(None, ign)
+            return ign
+        return d.addCallbacks(switchNow, handle).addErrback(die)
 
 class Negotiate(Command):
     commandName = 'Negotiate'

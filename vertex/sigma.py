@@ -1,5 +1,5 @@
-# Copyright 2005 Divmod, Inc.  See LICENSE file for details
 # -*- test-case-name: vertex.test.test_sigma -*-
+# Copyright 2005 Divmod, Inc.  See LICENSE file for details
 
 """
 %file transfer protocol, a-la bittorrent.
@@ -10,9 +10,10 @@ import random
 import sha
 import os
 import sets
-from cStringIO import StringIO
 
 from twisted.internet import protocol
+
+from twisted.python.filepath import FilePath
 
 from vertex import juice
 from vertex import q2q
@@ -142,7 +143,9 @@ class SigmaProtocol(juice.Juice):
 
     def command_PUT(self, name):
         peer = self.transport.getQ2QPeer()
-        self.nexus.pull(self.nexus.ui.allocateFile(name, peer), name, peer)
+        incompleteFilePath, fullFilePath = self.nexus.ui.allocateFile(
+            name, peer)
+        self.nexus.pull(incompleteFilePath, fullFilePath, name, peer)
         return DONE
 
     command_PUT.command = Put
@@ -345,27 +348,34 @@ class Transload:
     maximumMaskUpdateDelayAfterChange = 30.0
     maximumChangeCountBeforeMaskUpdate = 25
 
-    def __init__(self, authority, nexus, name, fob, ui,
-                 mask=None, maskfile=None, seed=False):
+    def __init__(self, authority, nexus, name,
+                 incompletePath, fullPath, ui,
+                 seed=False):
         """
         Create a Transload.
 
         @param authority: the q2q address of the first authority on this file.
         """
 
+        self.incompletePath = incompletePath
+        self.fullPath = fullPath
+
         self.ui = ui
         self.authorities = [authority] # q2q address(es) that you send VERIFYs to
-        self.file = fob         # open file object, with seek() and tell() and
-                                # optionally .name
-        if maskfile is None:
-            fname = getattr(fob, 'name', None)
-            if fname is not None:
-                maskfile = openMaskFile(fname)
-            else:
-                maskfile = StringIO()
-        if mask is None:
-            chunkCount = countChunks(self.getSize())
-            mask = bits.BitArray(size=chunkCount, default=int(seed))
+
+        self.seed = seed
+
+        if not seed:
+            self.file = openReadWrite(incompletePath.path)
+        else:
+            self.file = fullPath.open()
+
+        chunkCount = countChunks(self.getSize())
+        mask = bits.BitArray(size=chunkCount, default=int(seed))
+        if seed:
+            maskfile = None
+        else:
+            maskfile = openMaskFile(incompletePath.path)
 
         self.mask = mask        # BitArray object representing which chunks of
                                 # the file I've got
@@ -464,7 +474,17 @@ class Transload:
                     self.maximumChangeCountBeforeMaskUpdate,
                     self.maybeUpdateMask)
 
+            if not self.seed and not self.mask.countbits(0):
+                # we're done, let's let other people get at that file.
+                self.file.close()
+                os.rename(self.incompletePath.path,
+                          self.fullPath.path)
+                self.file = self.fullPath.open()
+                self.maskfile.close()
+                os.unlink(self.maskfile.name)
+
             self.ui.updateHostMask(self.mask)
+
 
     def maybeUpdateMask(self):
         if self.changes:
@@ -600,18 +620,18 @@ class BaseNexusUI:
     receivedIntroductions = 0
 
     def __init__(self, basepath=os.path.expanduser("~/Sigma/Downloads")):
-        self.basepath = basepath
+        self.basepath = FilePath(basepath)
         self.transloads = []
 
     def allocateFile(self, sharename, peer):
         """
-        Open a file on disk for writing upon receiving an incoming PUT request.
+        return a 2-tuple of incompletePath, fullPath
         """
-        # TODO: support Deferreds in the code that calls this method
-        finalPath = os.path.join(self.basepath, str(peer),
-                                 os.path.basename(sharename))
-        fob = openReadWrite(finalPath)
-        return fob
+        peerDir = self.basepath.child(str(peer))
+        if not peerDir.isdir():
+            peerDir.makedirs()
+        return (peerDir.child(sharename+'.incomplete'),
+                peerDir.child(sharename))
 
     def receivedIntroduction(self, peer, name):
         self.receivedIntroductions += 1
@@ -670,10 +690,11 @@ class Nexus(object):
             if peer in tl.peers:
                 yield tl
 
-    def seed(self, fileobj, name):
+    def seed(self, path, name):
         """Create a transload from an existing file that is complete.
         """
-        t = self.transloads[name] = Transload(self.addr, self, name, fileobj,
+        t = self.transloads[name] = Transload(self.addr, self, name,
+                                              None, path,
                                               self.ui.startTransload(name,
                                                                      self.addr),
                                               seed=True)
@@ -693,12 +714,13 @@ class Nexus(object):
                                         self.clientFactory)
 
 
-    def push(self, fob, name, peers):
-        t = self.seed(fob, name)
+    def push(self, fpath, name, peers):
+        t = self.seed(fpath, name)
         t.putToPeers(peers)
 
-    def pull(self, localFile, name, peer):
-        t = self.transloads[name] = Transload(peer, self, name, localFile,
+    def pull(self, incompletePath, finalPath, name, peer):
+        t = self.transloads[name] = Transload(peer, self, name,
+                                              incompletePath, finalPath,
                                               self.ui.startTransload(name, peer))
         D = self.connectPeer(peer).addCallback(lambda proto: proto.get(name))
         D.addCallback(t.changeSize)

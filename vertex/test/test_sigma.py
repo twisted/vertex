@@ -1,10 +1,12 @@
 # Copyright 2005 Divmod, Inc.  See LICENSE file for details
 
+import os
 from cStringIO import StringIO
 
 from twisted.internet.protocol import FileWrapper
 from twisted.internet import defer
 from twisted.python.failure import Failure
+from twisted.python.filepath import FilePath
 
 from twisted.trial import unittest
 
@@ -117,14 +119,20 @@ class FakeQ2QService:
 sender = Q2QAddress("sending-data.net", "sender")
 receiver = Q2QAddress("receiving-data.org", "receiver")
 
-class TestBase(unittest.TestCase, sigma.BaseNexusUI):
+class TestBase(unittest.TestCase):
     def setUp(self):
         self.realChunkSize = sigma.CHUNK_SIZE
         sigma.CHUNK_SIZE = 100
         svc = self.service = FakeQ2QService()
+        fname = self.mktemp()
 
-        self.sfile = StringIO(TEST_DATA)
-        self.senderNexus = sigma.Nexus(svc, sender, self, svc.callLater)
+        sf = self.sfile = FilePath(fname)
+        if not sf.parent().isdir():
+            sf.parent().makedirs()
+        sf.open('w').write(TEST_DATA)
+        self.senderNexus = sigma.Nexus(svc, sender,
+                                       sigma.BaseNexusUI(self.mktemp()),
+                                       svc.callLater)
 
     def tearDown(self):
         self.senderNexus.stopService()
@@ -134,10 +142,9 @@ class TestBase(unittest.TestCase, sigma.BaseNexusUI):
 class BasicTransferTest(TestBase):
     def setUp(self):
         TestBase.setUp(self)
-        self.rfiles = []
         self.stoppers = []
         self.receiverNexus = sigma.Nexus(self.service, receiver,
-                                         self,
+                                         sigma.BaseNexusUI(self.mktemp()),
                                          self.service.callLater)
         self.stoppers.append(self.receiverNexus)
 
@@ -148,21 +155,18 @@ class BasicTransferTest(TestBase):
             stopper.stopService()
 
 
-    def allocateFile(self, sharename, peer):
-        s = StringIO()
-        self.rfiles.append(s)
-        return s
-
-
     def testOneSenderOneRecipient(self):
         self.senderNexus.push(self.sfile, 'TEST->TEST', [receiver])
         self.service.flush()
-        self.assertEquals(len(self.rfiles), 1)
-        rfile = self.rfiles[0]
-        self.assertEquals(len(rfile.getvalue()),
-                          len(self.sfile.getvalue()))
-        self.assertEquals(rfile.getvalue(),
-                          self.sfile.getvalue(),
+        peerThingyoes = childrenOf(self.receiverNexus.ui.basepath)
+        self.assertEquals(len(peerThingyoes), 1)
+        rfiles = childrenOf(peerThingyoes[0])
+        self.assertEquals(len(rfiles), 1)
+        rfile = rfiles[0]
+        rfdata = rfile.open().read()
+        self.assertEquals(len(rfdata),
+                          len(TEST_DATA))
+        self.assertEquals(rfdata, TEST_DATA,
                           "file values unequal")
 
     def testOneSenderManyRecipients(self):
@@ -171,7 +175,7 @@ class BasicTransferTest(TestBase):
 
         nexi = [sigma.Nexus(self.service,
                             radr,
-                            self,
+                            sigma.BaseNexusUI(self.mktemp()),
                             self.service.callLater) for radr in raddresses]
 
         self.stoppers.extend(nexi)
@@ -179,11 +183,23 @@ class BasicTransferTest(TestBase):
         self.senderNexus.push(self.sfile, 'TEST->TEST', raddresses)
         self.service.flush()
 
-        self.failUnless(self.receivedIntroductions > 1)
+        receivedIntroductions = 0
 
-        for rfile in self.rfiles:
-            self.assertEquals(rfile.getvalue(),
-                              self.sfile.getvalue(),
+        for nexium in nexi:
+            receivedIntroductions += nexium.ui.receivedIntroductions
+        self.failUnless(receivedIntroductions > 1)
+
+        for nexium in nexi:
+            peerFiles = childrenOf(nexium.ui.basepath)
+            self.assertEquals(len(peerFiles), 1)
+            rfiles = childrenOf(peerFiles[0])
+            self.assertEquals(len(rfiles), 1, rfiles)
+            rfile = rfiles[0]
+            self.assertEquals(rfile.open().read(),
+                              TEST_DATA,
                               "file value mismatch")
 
 
+def childrenOf(x):
+    # this should be a part of FilePath, but hey
+    return map(x.child, x.listdir())
