@@ -742,7 +742,7 @@ class PtcpAddress(object):
         self.pseudoPeerPort = pseudoPeerPort
 
     def __repr__(self):
-        return 'PtcpAddress((%r, %r), (%r, %r)' % (
+        return 'PtcpAddress((%r, %r), (%r, %r))' % (
             self.host, self.port,
             self.pseudoHostPort,
             self.pseudoPeerPort)

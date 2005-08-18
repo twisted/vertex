@@ -283,8 +283,12 @@ class JuiceParserBase(DispatchMixin):
         self._outstandingRequests = {}
 
     def _puke(self, failure):
-        log.msg("Unhandled client-side report of Juice server or network failure:")
+        log.msg("Juice server or network failure "
+                "unhandled by client application:")
         log.err(failure)
+        log.msg(
+            "Dropping connection!  "
+            "To avoid, add errbacks to ALL remote commands!")
         if self.transport is not None:
             self.transport.loseConnection()
 

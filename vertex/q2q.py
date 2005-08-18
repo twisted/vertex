@@ -466,13 +466,18 @@ class RPTCPConnectionAttempt(AbstractConnectionAttempt):
                     )
             return self.deferred
 
+        def swallowKnown(error):
+            error.trap(ConnectionError)
+            self.deferred.errback(CONNECTION_DONE)
+            return self.deferred
+
         return BindUDP(
             q2qsrc=self.toAddress,
             q2qdst=self.fromAddress,
             protocol=self.protocolName,
             udpsrc=(self.method.host, self.method.port),
             udpdst=(self.q2qproto._determinePublicIP(), realLocalUDP)
-            ).do(self.q2qproto).addCallback(enbinden)
+            ).do(self.q2qproto).addCallbacks(enbinden, swallowKnown)
 
     def cancel(self):
         if not self.cancelled:
@@ -851,6 +856,7 @@ class Q2Q(juice.Juice, subproducer.SuperProducer):
         self._uncacheMe()
         self.producingTransports = {}
         for key, value in self.listeningClient:
+            log.msg("removing remote listener for %r" % (key,))
             self.service.listeningClients[key].remove(value)
         self.listeningClient = []
         for xport in self.connections.values():
