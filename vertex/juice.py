@@ -782,6 +782,12 @@ class Juice(LineReceiver, JuiceParserBase):
     _justStartedTLS = False
 
     def makeConnection(self, transport):
+        self._transportPeer = transport.getPeer()
+        self._transportHost = transport.getHost()
+        log.msg("%s %s connection established (HOST:%s PEER:%s)" % (self.isClient and "client" or "server",
+                                                                    self.__class__.__name__,
+                                                                    self._transportHost,
+                                                                    self._transportPeer))
         self._outstandingRequests = {}
         self._requestBuffer = []
         self._sslVerifyProblems = ()
@@ -827,6 +833,10 @@ class Juice(LineReceiver, JuiceParserBase):
         return LineReceiver.dataReceived(self, data)
 
     def connectionLost(self, reason):
+        log.msg("%s %s connection lost (HOST:%s PEER:%s)" % (self.isClient and 'client' or 'server',
+                                                             self.__class__.__name__,
+                                                             self._transportHost,
+                                                             self._transportPeer))
         # XXX this may be a slight oversimplification, but I believe that if
         # there are pending SSL errors, they _are_ the reason that the
         # connection was lost.  a totally correct implementation of this would
@@ -923,8 +933,17 @@ VERSIONS = [1]
 from cStringIO import StringIO
 class _ParserHelper(Juice):
     def __init__(self):
+        Juice.__init__(self, False)
         self.boxes = []
         self.results = Deferred()
+
+    def getPeer(self):
+        return 'string'
+
+    def getHost(self):
+        return 'string'
+
+    disconnecting = False
 
     def juiceBoxReceived(self, box):
         self.boxes.append(box)
@@ -932,7 +951,7 @@ class _ParserHelper(Juice):
     # Synchronous helpers
     def parse(cls, fileObj):
         p = cls()
-        p.makeConnection(None)
+        p.makeConnection(p)
         p.dataReceived(fileObj.read())
         return p.boxes
     parse = classmethod(parse)

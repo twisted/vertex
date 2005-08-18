@@ -465,7 +465,9 @@ class PtcpConnection(tcpdfa.TCP):
 
 
     def getHost(self):
-        return self.transport.getHost()
+        tupl = self.ptcp.transport.getHost()
+        return PtcpAddress((tupl.host, tupl.port),
+                           self.pseudoPortPair)
 
     def getPeer(self):
         return PtcpAddress(self.peerAddressTuple,

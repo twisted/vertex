@@ -1,10 +1,12 @@
-# -*- test-case-name: vertex.test.test_q2q.UDPConnection.testBadIssuerOnSelfSignedCert -*-
+# -*- test-case-name: vertex.test.test_q2q -*-
 # Copyright 2005 Divmod, Inc.  See LICENSE file for details
 
 # stdlib
 import itertools
 import md5
 import struct
+
+from pprint import pformat
 
 from zope.interface import implements
 
@@ -643,6 +645,8 @@ class BindUDP(juice.Command):
         ('udpdst', HostPort()),
         ]
 
+    errors = {ConnectionError: 'ConnectionError'}
+
     response = []
 
 class SourceIP(juice.Command):
@@ -844,6 +848,7 @@ class Q2Q(juice.Juice, subproducer.SuperProducer):
     def connectionLost(self, reason):
         ""
         juice.Juice.connectionLost(self, reason)
+        self._uncacheMe()
         self.producingTransports = {}
         for key, value in self.listeningClient:
             self.service.listeningClients[key].remove(value)
@@ -1101,6 +1106,7 @@ class Q2Q(juice.Juice, subproducer.SuperProducer):
         result = []             # list of listener dicts
 
         if srvfacts:
+            log.msg("local factories found for inbound request: %r" % (srvfacts,))
             localMethods = []
             publicIP = self._determinePublicIP()
             privateIP = self._determinePrivateIP()
@@ -1150,7 +1156,7 @@ class Q2Q(juice.Juice, subproducer.SuperProducer):
 
             if self.service.virtualEnabled:
                 localMethods.append(VirtualMethod())
-            log.msg('sending local methods to peer: %r' % (localMethods,))
+            log.msg('responding to inbound with local methods: %r' % (localMethods,))
 
             for serverFactory, description in srvfacts:
                 expiryTime, listenID = self.service.mapListener(
@@ -1171,20 +1177,28 @@ class Q2Q(juice.Juice, subproducer.SuperProducer):
                         Protocol=protocol,
                         UDP_Source=udp_source)
             DL = []
-            for listener, listenCert, desc in self.service.listeningClients[key]:
+            lclients = self.service.listeningClients[key]
+            log.msg("listeners found for %s:%r" % (to, protocol))
+            for listener, listenCert, desc in lclients:
+                log.msg("relaying inbound to %r via %r" % (to, listener))
                 DL.append(Inbound(**args).do(listener).addCallback(
                     self._massageClientInboundResponse, listener, result))
 
             def allListenerResponses(x):
+                log.msg("all inbound responses received: %s" % (pformat(result),))
                 return dict(listeners=result)
             return defer.DeferredList(DL).addCallback(allListenerResponses)
         else:
+            log.msg("no listenening clients for %s:%r. local methods: %r" % (to,protocol, result))
             return dict(listeners=result)
 
     command_INBOUND.command = Inbound
 
     def _massageClientInboundResponse(self, inboundResponse, listener, result):
         irl = inboundResponse['listeners']
+        log.msg("received relayed inbound response: %r via %r" %
+                (inboundResponse, listener))
+
         for listenerInfo in irl:
             # inboundResponse['description'] = ??? trust client version for
             # now... maybe the server doesn't even need to know about
@@ -1342,13 +1356,7 @@ class Q2Q(juice.Juice, subproducer.SuperProducer):
 
         def hadCert(peerSigned):
             self.authorized = True
-            tcpeer = self.transport.getPeer()
-            # XXX 'port' is insane here, but we lack a better number to hash
-            # against.  perhaps the SECURE request should give a reciprocal
-            # connection identifier...?
-            self.service.secureConnectionCache.cacheUnrequested(
-                endpoint.TCPEndpoint(tcpeer.host, port),
-                (From, to.domain, authorize), self)
+            self._cacheMeNow(From, to, authorize)
             return [ourCert, peerSigned]
 
         def didNotHaveCert(err):
@@ -1362,6 +1370,30 @@ class Q2Q(juice.Juice, subproducer.SuperProducer):
 
     command_SECURE.command = Secure
 
+    _cachedUnrequested = False
+
+    def _cacheMeNow(self, From, to, authorize):
+        tcpeer = self.transport.getPeer()
+        # XXX 'port' is insane here, but we lack a better number to hash
+        # against.  perhaps the SECURE request should give a reciprocal
+        # connection identifier...?
+        self.service.secureConnectionCache.cacheUnrequested(
+            endpoint.TCPEndpoint(tcpeer.host, port),
+            (From, to.domain, authorize), self)
+        assert not self._cachedUnrequested
+        self._cachedUnrequested = (From, to, authorize, tcpeer)
+
+    def _uncacheMe(self):
+        if self._cachedUnrequested:
+            # If this is a client connection, this will never be called, since
+            # _cacheMeNow is called from the _server_ half of this business.
+            # The uncaching API here is a bit of a ragged edge of conncache.py;
+            # the interface should probably be cleaned up, but I don't think
+            # there are any functional problems with it.
+            From, to, authorize, tcpeer = self._cachedUnrequested
+            self.service.secureConnectionCache.connectionLostForKey(
+                (endpoint.TCPEndpoint(tcpeer.host, port),
+                 (From, to.domain, authorize)))
 
     def _retrieveRemoteCertificate(self, From, port=port):
         """
