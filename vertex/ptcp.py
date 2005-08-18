@@ -69,7 +69,7 @@ class PtcpPacket(util.FancyStrMixin, object):
 
     # Number of retransmit attempts left for this segment.  When it reaches
     # zero, this segment is dead.
-    retransmitCount = 5
+    retransmitCount = 50
 
     def shortdata():
         def get(self):
@@ -524,6 +524,7 @@ class PtcpConnection(tcpdfa.TCP):
 
     def _reallyRetransmit(self):
         # XXX TODO: packet fragmentation & coalescing.
+        # print 'Wee a retransmit!  What I got?', self.retransmissionQueue
         self._retransmitter = None
         if self.retransmissionQueue:
             for packet in self.retransmissionQueue:
@@ -695,6 +696,8 @@ class PtcpConnection(tcpdfa.TCP):
         We sent out SYN, they acknowledged it.  Congratulations, you
         have a new baby connection.
         """
+        assert not self.disconnecting
+        assert not self.disconnected
         try:
             p = self.factory.buildProtocol(PtcpAddress(
                     self.peerAddressTuple, self.pseudoPortPair))
@@ -707,6 +710,7 @@ class PtcpConnection(tcpdfa.TCP):
             self.protocol = p
 
     def exit_ESTABLISHED(self):
+        assert not self.disconnected
         self.disconnected = True
         try:
             self.protocol.connectionLost(CONNECTION_DONE)

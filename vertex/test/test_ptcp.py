@@ -8,9 +8,10 @@ from twisted.trial import unittest, assertions
 from vertex import ptcp
 
 def reallyLossy(method):
-    deliver = itertools.cycle([True, True, True, True, True, True, True, True, True, True, True]).next
+    r = random.Random()
+    r.seed(42)
     def worseMethod(*a, **kw):
-        if deliver():
+        if r.choice([True, True, False]):
             method(*a, **kw)
     return worseMethod
 

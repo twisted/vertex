@@ -110,19 +110,6 @@ class TLSBox(JuiceBox):
         if self.sslstarted is not None:
             self.sslstarted()
 
-class SwitchBox(JuiceBox):
-    """
-    Switch to another protocol upon sending.
-    """
-
-    def __init__(self, __innerProto, **kw):
-        super(SwitchBox, self).__init__(**kw)
-        self.innerProto = __innerProto
-
-    def sendTo(self, proto):
-        super(SwitchBox, self).sendTo(proto)
-        proto.switchTo(innerProto)
-
 class QuitBox(JuiceBox):
     def sendTo(self, proto):
         super(QuitBox, self).sendTo(proto)
@@ -668,13 +655,13 @@ class ProtocolSwitchCommand(Command):
         proto._lock()
         def switchNow(ign):
             innerProto = self.protoToSwitchToFactory.buildProtocol(proto.transport.getPeer())
-            proto.switchTo(innerProto)
+            proto.switchTo(innerProto, self.protoToSwitchToFactory)
             return ign
         def die(ign):
             proto.transport.loseConnection()
             return ign
         def handle(ign):
-            self.protoToSwitchToFactory.clientConnectionFailed(None, ign)
+            self.protoToSwitchToFactory.clientConnectionFailed(None, Failure(CONNECTION_LOST))
             return ign
         return d.addCallbacks(switchNow, handle).addErrback(die)
 
@@ -746,7 +733,7 @@ class Juice(LineReceiver, JuiceParserBase):
 
     innerProtocol = None
 
-    def switchTo(self, newProto):
+    def switchTo(self, newProto, clientFactory=None):
         """ Switch this Juice instance to a new protocol.  You need to do this
         'simultaneously' on both ends of a connection; the easiest way to do
         this is to use a subclass of ProtocolSwitchCommand on one side, and on
@@ -755,10 +742,18 @@ class Juice(LineReceiver, JuiceParserBase):
         CAUTION: using Deferreds in conjunection with this method is possible
         in principle but likely to be _highly confusing_.  Please do not do it
         unless you are familiar with Juice's internals.
+
+        The optional second argument is generally not necessary when passing
+        from application code, as it specifies a client factory to notify with
+        clientConnectionLost when the client's connection is lost.  If you are
+        dealing with the client half of switchTo, use a ProtocolSwitchCommand.
         """
 
         assert self.innerProtocol is None, "Protocol can only be safely switched once."
         self.innerProtocol = newProto
+        self.innerProtocolClientFactory = clientFactory
+
+    innerProtocolClientFactory = None
 
     def juiceBoxReceived(self, box):
         if self.__locked and COMMAND in box and ASK in box:
@@ -852,6 +847,8 @@ class Juice(LineReceiver, JuiceParserBase):
         self.failAllOutgoing(failReason)
         if self.innerProtocol is not None:
             self.innerProtocol.connectionLost(reason)
+            if self.innerProtocolClientFactory is not None:
+                self.innerProtocolClientFactory.clientConnectionLost(None, reason)
 
     def lineReceived(self, line):
         if line:

@@ -1,4 +1,4 @@
-# -*- test-case-name: vertex.test.test_q2q -*-
+# -*- test-case-name: vertex.test.test_q2q.UDPConnection.testBadIssuerOnSelfSignedCert -*-
 # Copyright 2005 Divmod, Inc.  See LICENSE file for details
 
 # stdlib
@@ -225,7 +225,7 @@ class Q2QClientProtocolFactoryWrapper:
 
     myClient = None
     def setMyClient(self, myClient):
-        print '***CLIENT SET***', self, self.fromAddress, self.toAddress, self.cpf
+        # print '***CLIENT SET***', self, self.fromAddress, self.toAddress, self.cpf
         self.myClient = myClient
         return myClient
 
@@ -240,11 +240,8 @@ class Q2QClientProtocolFactoryWrapper:
     def clientConnectionFailed(self, connector, reason):
         # DON'T forward this to our client protocol factory; only one attempt
         # has failed; let that happen later, when _ALL_ attempts have failed.
-        print 'client connection failing...'
         assert self.myClient is None
-        print 'assert passed'
         self.connectionEstablishedDeferred.errback(reason)
-        print 'deferred errbacked'
 
     def clientConnectionLost(self, connector, reason):
         # as in clientConnectionFailed, don't bother to forward; this
@@ -1630,14 +1627,11 @@ class SeparateConnectionTransport(object):
         self.transport.unregisterProducer()
 
     def loseConnection(self):
-        print 'losing separate connection'
         self.transport.loseConnection()
 
     def connectionLost(self, reason):
-        print 'separate connection connection lost'
         self.service.subConnections.remove(self)
         if self.subProtocol is not None:
-            print 'sub protocol connection lost', self.subProtocol
             self.subProtocol.connectionLost(reason)
             self.subProtocol = None
 
@@ -1670,16 +1664,6 @@ class Q2QBootstrap(juice.Juice):
                 err.trap(KeyError)
             self.retrieveConnection(self.connIdentifier, self.protoFactory).addErrback(trapKeyError)
 
-    def connectionLost(self, reason):
-        print 'q2q bootstrap connection lost: upcalling'
-        juice.Juice.connectionLost(self, reason)
-        if self.protoFactory is not None:
-            if self.innerProtocol is not None:
-                # XXX TODO: MUST IMPLEMENT ICONNECTOR
-                self.protoFactory.clientConnectionLost(self, reason)
-            else:
-                self.protoFactory.clientConnectionFailed(self, reason)
-
     def whoami(self):
         """Return a Deferred which fires with a 2-tuple of (dotted quad ip, port
         number).
@@ -1704,7 +1688,7 @@ class Q2QBootstrap(juice.Juice):
     def command_RETRIEVE_CONNECTION(self, identifier):
         listenerInfo = self.service.lookupListener(identifier)
         if listenerInfo is None:
-            raise KeyError()
+            raise KeyError(identifier)
         else:
             proto = listenerInfo.protocolFactory.buildProtocol(listenerInfo.From)
             self.switchTo(SeparateConnectionTransport(
