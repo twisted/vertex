@@ -31,8 +31,10 @@ APP_SEND_DATA = 'APP_SEND'
 TIMEOUT = 'TIMEOUT'
 APP_CLOSE = 'APP_CLOSE'
 
-# My own vocabulary:
-BROKEN = 'BROKEN'
+# This isn't detailed by the spec in the diagram, so we use a different
+# identifier, but in various places it does make references to going straight
+# to the 'closed' state.
+BROKEN = 'CLOSED'
 
 
 class TCP(StateMachine):

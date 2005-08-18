@@ -1,11 +1,24 @@
 # -*- test-case-name: vertex.test.test_ptcp -*-
 
-import random, os
+import itertools, random, os
 
-from twisted.internet import reactor, protocol, defer, task
-from twisted.trial import unittest
+from twisted.internet import reactor, protocol, defer, task, error
+from twisted.trial import unittest, assertions
 
 from vertex import ptcp
+
+def reallyLossy(method):
+    deliver = itertools.cycle([True, True, True, True, True, True, True, True, True, True, True]).next
+    def worseMethod(*a, **kw):
+        if deliver():
+            method(*a, **kw)
+    return worseMethod
+
+def insufficientTransmitter(method,  mtu):
+    def worseMethod(bytes, addr):
+        method(bytes[:mtu], addr)
+    return worseMethod
+
 
 class TestProtocol(protocol.Protocol):
     buffer = None
@@ -40,6 +53,62 @@ class TestProtocol(protocol.Protocol):
                 self._waiting[0].callback(None)
                 self._waiting = None
 
+class Django(protocol.ClientFactory):
+    def __init__(self):
+        self.onConnect = defer.Deferred()
+
+    def buildProtocol(self, addr):
+        p = protocol.ClientFactory.buildProtocol(self, addr)
+        self.onConnect.callback(p)
+        return p
+
+    def clientConnectionFailed(self, conn, err):
+        self.onConnect.errback(err)
+
+class ConnectedPTCPMixin:
+    serverPort = None
+
+    def setUpForATest(self,
+                      ServerProtocol=TestProtocol, ClientProtocol=TestProtocol):
+        serverProto = ServerProtocol()
+        clientProto = ClientProtocol()
+
+
+        self.serverProto = serverProto
+        self.clientProto = clientProto
+
+        sf = protocol.ServerFactory()
+        sf.protocol = lambda: serverProto
+
+        cf = Django()
+        cf.protocol = lambda: clientProto
+
+        serverTransport = ptcp.Ptcp(sf)
+        clientTransport = ptcp.Ptcp(None)
+        serverPort = reactor.listenUDP(0, serverTransport)
+        clientPort = reactor.listenUDP(0, clientTransport)
+
+        self.clientPort = clientPort
+        self.serverPort = serverPort
+
+        return (
+            serverProto, clientProto,
+            sf, cf,
+            serverTransport, clientTransport,
+            serverPort, clientPort
+            )
+
+
+    def tearDown(self):
+        if self.serverPort is not None:
+            self.serverPort.stopListening()
+            self.clientPort.stopListening()
+            for p in self.serverProto, self.clientProto:
+                if p.transport is not None:
+                    p.transport._stopRetransmitting()
+
+
+
 class TestProducerProtocol(protocol.Protocol):
     NUM_WRITES = 32
     WRITE_SIZE = 32
@@ -73,50 +142,14 @@ class TestProducerProtocol(protocol.Protocol):
             # print 'Unregistering'
             self.transport.unregisterProducer()
 
-class PtcpTransportTestCase(unittest.TestCase):
+class PtcpTransportTestCase(ConnectedPTCPMixin, unittest.TestCase):
     def setUpClass(self):
         ptcp.PtcpConnection._retransmitTimeout /= 10
+        ptcp.PtcpPacket.retransmitCount *= 10
 
     def tearDownClass(self):
         ptcp.PtcpConnection._retransmitTimeout *= 10
-
-    def setUpForATest(self,
-                      ServerProtocol=TestProtocol, ClientProtocol=TestProtocol):
-        serverProto = ServerProtocol()
-        clientProto = ClientProtocol()
-
-
-        self.serverProto = serverProto
-        self.clientProto = clientProto
-
-        sf = protocol.ServerFactory()
-        sf.protocol = lambda: serverProto
-
-        cf = protocol.ClientFactory()
-        cf.protocol = lambda: clientProto
-
-        serverTransport = ptcp.Ptcp(sf)
-        clientTransport = ptcp.Ptcp(None)
-        serverPort = reactor.listenUDP(0, serverTransport)
-        clientPort = reactor.listenUDP(0, clientTransport)
-
-        self.clientPort = clientPort
-        self.serverPort = serverPort
-
-        return (
-            serverProto, clientProto,
-            sf, cf,
-            serverTransport, clientTransport,
-            serverPort, clientPort
-            )
-
-
-    def tearDown(self):
-        self.serverPort.stopListening()
-        self.clientPort.stopListening()
-        for p in self.serverProto, self.clientProto:
-            p.transport._stopRetransmitting()
-
+        ptcp.PtcpPacket.retransmitCount /= 10
 
     def testWhoAmI(self):
         (serverProto, clientProto,
@@ -260,26 +293,13 @@ class PtcpTransportTestCase(unittest.TestCase):
         return connD
 
 
-def randomLossy(method):
-    def worseMethod(*a, **kw):
-        if random.choice((True, True, False)):
-            method(*a, **kw)
-    return worseMethod
-
-class RandomLossyTransportTestCase(PtcpTransportTestCase):
+class LossyTransportTestCase(PtcpTransportTestCase):
     def setUpForATest(self, *a, **kw):
         results = PtcpTransportTestCase.setUpForATest(self, *a, **kw)
-        results[-2].write = randomLossy(results[-2].write)
-        results[-2].writeSequence = randomLossy(results[-2].writeSequence)
-        results[-1].write = randomLossy(results[-1].write)
-        results[-1].writeSequence = randomLossy(results[-1].writeSequence)
+        results[-2].write = reallyLossy(results[-2].write)
+        results[-1].write = reallyLossy(results[-1].write)
         return results
 
-
-def insufficientTransmitter(method,  mtu):
-    def worseMethod(bytes, addr):
-        method(bytes[:mtu], addr)
-    return worseMethod
 
 class SmallMTUTransportTestCase(PtcpTransportTestCase):
     def setUpForATest(self, *a, **kw):
@@ -287,3 +307,37 @@ class SmallMTUTransportTestCase(PtcpTransportTestCase):
         results[-2].write = insufficientTransmitter(results[-2].write, 128)
         results[-1].write = insufficientTransmitter(results[-1].write, 128)
         return results
+
+class TimeoutTestCase(ConnectedPTCPMixin, unittest.TestCase):
+    def setUpClass(self):
+        ptcp.PtcpConnection._retransmitTimeout /= 10
+
+    def tearDownClass(self):
+        ptcp.PtcpConnection._retransmitTimeout *= 10
+
+    def testConnectTimeout(self):
+        (serverProto, clientProto,
+         sf, cf,
+         serverTransport, clientTransport,
+         serverPort, clientPort) = self.setUpForATest()
+
+        clientTransport.sendPacket = lambda *a, **kw: None
+        clientConnID = clientTransport.connect(cf, '127.0.0.1', serverPort.getHost().port)
+        return assertions.assertFailure(cf.onConnect, error.TimeoutError)
+
+    def testDataTimeout(self):
+        (serverProto, clientProto,
+         sf, cf,
+         serverTransport, clientTransport,
+         serverPort, clientPort) = self.setUpForATest()
+
+        def cbConnected(ignored):
+            serverProto.transport.ptcp.sendPacket = lambda *a, **kw: None
+            clientProto.transport.write('Receive this data.')
+            return clientProto.onDisconn
+
+        clientConnID = clientTransport.connect(cf, '127.0.0.1', serverPort.getHost().port)
+
+        d = defer.DeferredList([serverProto.onConnect, clientProto.onConnect])
+        d.addCallback(cbConnected)
+        return d

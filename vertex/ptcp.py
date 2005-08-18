@@ -58,6 +58,7 @@ class PtcpPacket(util.FancyStrMixin, object):
         ('ackNum', 'ack', '%d'),
         ('checksum', 'checksum', '%x'),
         ('peerAddressTuple', 'peerAddress', '%r'),
+        ('retransmitCount', 'retransmitCount', '%d'),
         )
 
     syn = _flagprop(_SYN)
@@ -65,6 +66,10 @@ class PtcpPacket(util.FancyStrMixin, object):
     fin = _flagprop(_FIN)
     rst = _flagprop(_RST)
     stb = _flagprop(_STB)
+
+    # Number of retransmit attempts left for this segment.  When it reaches
+    # zero, this segment is dead.
+    retransmitCount = 5
 
     def shortdata():
         def get(self):
@@ -503,6 +508,7 @@ class PtcpConnection(tcpdfa.TCP):
     _retransmitTimeout = 0.5
 
     def _retransmitLater(self):
+        assert self.state != 'CLOSED'
         if self._retransmitter is None:
             self._retransmitter = reactor.callLater(self._retransmitTimeout, self._reallyRetransmit)
 
@@ -512,14 +518,22 @@ class PtcpConnection(tcpdfa.TCP):
         if self._retransmitter is not None:
             self._retransmitter.cancel()
             self._retransmitter = None
+        if self._nagle is not None:
+            self._nagle.cancel()
+            self._nagle = None
 
     def _reallyRetransmit(self):
         # XXX TODO: packet fragmentation & coalescing.
         self._retransmitter = None
         if self.retransmissionQueue:
             for packet in self.retransmissionQueue:
-                packet.ackNum = self.currentAckNum()
-                self.ptcp.sendPacket(packet)
+                packet.retransmitCount -= 1
+                if packet.retransmitCount:
+                    packet.ackNum = self.currentAckNum()
+                    self.ptcp.sendPacket(packet)
+                else:
+                    self.input(tcpdfa.TIMEOUT)
+                    return
             self._retransmitLater()
 
     disconnecting = False       # This is *TWISTED* level state-machine stuff,
