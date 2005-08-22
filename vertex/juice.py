@@ -13,9 +13,9 @@ from twisted.internet.protocol import ServerFactory, ClientFactory
 from twisted.python.failure import Failure
 from twisted.python import log
 
-from vertex.sslverify import Certificate, problemsFromTransport, PeerVerifyError
+from epsilon import extime
 
-from axiom import extime
+from vertex.sslverify import Certificate, problemsFromTransport, PeerVerifyError
 
 ASK = '_ask'
 ANSWER = '_answer'

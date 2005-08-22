@@ -1,8 +1,9 @@
 # -*- test-case-name: vertex.test.test_ptcp -*-
 
-import time
 import struct, zlib
-import random
+import itertools
+
+from epsilon.pending import PendingEvent
 
 from twisted.internet import protocol, error, reactor, defer
 from twisted.internet.main import CONNECTION_DONE
@@ -10,6 +11,11 @@ from twisted.python import log, util
 
 from vertex import tcpdfa
 from vertex.statemachine import StateError
+
+
+genConnID = itertools.count(8).next
+
+MAX_PSEUDO_PORT = (2 ** 16)
 
 _packetFormat = ('!' # WTF did you think
                  'H' # sourcePseudoPort
@@ -47,7 +53,7 @@ def relativeSequence(wireSequence, initialSequence, lapNumber):
     """
     return (wireSequence + (lapNumber * (2**32))) - initialSequence
 
-class PtcpPacket(util.FancyStrMixin, object):
+class PTCPPacket(util.FancyStrMixin, object):
     showAttributes = (
         ('sourcePseudoPort', 'sourcePseudoPort', '%d'),
         ('destPseudoPort', 'destPseudoPort', '%d'),
@@ -238,7 +244,7 @@ class BadPacketError(Exception):
     """
     """
 
-class PtcpConnection(tcpdfa.TCP):
+class PTCPConnection(tcpdfa.TCP):
     """
     Implementation of RFC 793 state machine.
 
@@ -466,11 +472,11 @@ class PtcpConnection(tcpdfa.TCP):
 
     def getHost(self):
         tupl = self.ptcp.transport.getHost()
-        return PtcpAddress((tupl.host, tupl.port),
+        return PTCPAddress((tupl.host, tupl.port),
                            self.pseudoPortPair)
 
     def getPeer(self):
-        return PtcpAddress(self.peerAddressTuple,
+        return PTCPAddress(self.peerAddressTuple,
                            self.pseudoPortPair)
 
     _outgoingBytes = ''
@@ -510,7 +516,7 @@ class PtcpConnection(tcpdfa.TCP):
     _retransmitTimeout = 0.5
 
     def _retransmitLater(self):
-        assert self.state != 'CLOSED'
+        assert self.state != tcpdfa.CLOSED
         if self._retransmitter is None:
             self._retransmitter = reactor.callLater(self._retransmitTimeout, self._reallyRetransmit)
 
@@ -556,7 +562,8 @@ class PtcpConnection(tcpdfa.TCP):
             if (not self.streamingProducer) or self.producerPaused:
                 self.producerPaused = False
                 self.producer.resumeProducing()
-        elif self.disconnecting and not self.disconnected:
+        elif self.disconnecting and (not self.disconnected
+                                     or self.state == tcpdfa.CLOSE_WAIT):
             self.input(tcpdfa.APP_CLOSE)
 
 
@@ -615,7 +622,7 @@ class PtcpConnection(tcpdfa.TCP):
             # started with relativeSequence
             assert self.nextSendSeqNum == 0
             assert self.hostSendISN == 0
-        p = PtcpPacket.create(self.hostPseudoPort,
+        p = PTCPPacket.create(self.hostPseudoPort,
                               self.peerPseudoPort,
                               seqNum=(self.nextSendSeqNum + self.hostSendISN) % (2**32),
                               ackNum=self.currentAckNum(),
@@ -646,9 +653,6 @@ class PtcpConnection(tcpdfa.TCP):
                 pass
         self.ptcp.sendPacket(p)
 
-    def stopListening(self):
-        del self.ptcp._connections[self.sourcePseudoPort]
-
     # State machine transition definitions, hooray.
     def transition_SYN_SENT_to_CLOSED(self):
         """
@@ -666,20 +670,30 @@ class PtcpConnection(tcpdfa.TCP):
         self.wasEverListen = True
 
     def enter_CLOSED(self):
+        self.ptcp.connectionClosed(self)
         self._stopRetransmitting()
+        if self._timeWaitCall is not None:
+            self._timeWaitCall.cancel()
+            self._timeWaitCall = None
+
+    _timeWaitCall = None
+    _timeWaitTimeout = 0.01     # REALLY fast timeout, right now this is for
+                                # the tests...
 
     def enter_TIME_WAIT(self):
-        del self.ptcp._connections[self.sourcePseudoPort]
-        for dcall in self._nagle, self._retransmitter:
-            if dcall is not None:
-                dcall.cancel()
+        self._stopRetransmitting()
+        self._timeWaitCall = reactor.callLater(self._timeWaitTimeout, self._do2mslTimeout)
+
+    def _do2mslTimeout(self):
+        self._timeWaitCall = None
+        self.input(tcpdfa.TIMEOUT)
 
     peerAddressTuple = None
 
     def transition_LISTEN_to_SYN_SENT(self):
         """
         Uh, what?  We were listening and we tried to send some bytes.
-        This is an error for Ptcp.
+        This is an error for PTCP.
         """
         raise StateError("You can't write anything until someone connects to you.")
 
@@ -701,11 +715,11 @@ class PtcpConnection(tcpdfa.TCP):
         assert not self.disconnecting
         assert not self.disconnected
         try:
-            p = self.factory.buildProtocol(PtcpAddress(
+            p = self.factory.buildProtocol(PTCPAddress(
                     self.peerAddressTuple, self.pseudoPortPair))
             p.makeConnection(self)
         except:
-            log.msg("Exception during Ptcp connection setup.")
+            log.msg("Exception during PTCP connection setup.")
             log.err()
             self.loseConnection()
         else:
@@ -720,6 +734,39 @@ class PtcpConnection(tcpdfa.TCP):
             log.err()
         self.protocol = None
 
+        if self.producer is not None:
+            try:
+                self.producer.stopProducing()
+            except:
+                log.err()
+            self.producer = None
+
+
+    def enter_CLOSE_WAIT(self):
+        # Twisted automatically reacts to network half-close by issuing a full
+        # close.
+        reactor.callLater(0.01, self.loseConnection)
+
+
+    def immediateShutdown(self):
+        """_IMMEDIATELY_ shut down this connection, sending one (non-retransmitted)
+        app-close packet, emptying our buffers, clearing our producer and
+        getting ready to die right after this call.
+        """
+        self._outgoingBytes = ''
+        if self.state == tcpdfa.ESTABLISHED:
+            self.input(tcpdfa.APP_CLOSE)
+            self._stopRetransmitting()
+            self._reallyRetransmit()
+
+        # All states that we can reasonably be in handle a timeout; force our
+        # connection to think that it's become desynchronized with the other
+        # end so that it will totally shut itself down.
+
+        self.input(tcpdfa.TIMEOUT)
+        assert self._retransmitter is None
+        assert self._nagle is None
+
     def output_ACK(self):
         self.originate(ack=True)
 
@@ -732,7 +779,7 @@ class PtcpConnection(tcpdfa.TCP):
     def output_SYN(self):
         self.originate(syn=True)
 
-class PtcpAddress(object):
+class PTCPAddress(object):
     # garbage
 
     def __init__(self, (host, port), (pseudoHostPort, pseudoPeerPort)):
@@ -742,57 +789,83 @@ class PtcpAddress(object):
         self.pseudoPeerPort = pseudoPeerPort
 
     def __repr__(self):
-        return 'PtcpAddress((%r, %r), (%r, %r))' % (
+        return 'PTCPAddress((%r, %r), (%r, %r))' % (
             self.host, self.port,
             self.pseudoHostPort,
             self.pseudoPeerPort)
 
-import itertools
-genConnID = itertools.count(8).next
-
-MAX_PSEUDO_PORT = (2 ** 16)
-
-class Ptcp(protocol.DatagramProtocol):
+class PTCP(protocol.DatagramProtocol):
     # External API
 
     def __init__(self, factory):
         self.factory = factory
+        self._allConnectionsClosed = PendingEvent()
 
     def connect(self, factory, host, port, pseudoPort=1):
         sourcePseudoPort = genConnID() % MAX_PSEUDO_PORT
         conn = self._connections[(pseudoPort, sourcePseudoPort, (host, port))
-                                 ] = PtcpConnection(
+                                 ] = PTCPConnection(
             sourcePseudoPort, pseudoPort, self, factory, (host, port))
         conn.input(tcpdfa.APP_ACTIVE_OPEN)
-        return sourcePseudoPort
+        return conn
 
     def sendPacket(self, packet):
-        # print 'send', packet
+        if self.transportGoneAway:
+            return
         self.transport.write(packet.encode(), packet.destination)
 
 
     # Internal stuff
     def startProtocol(self):
+        self.transportGoneAway = False
         self._lastConnID = 10 # random.randrange(2 ** 32)
         self._connections = {}
 
-    def stopProtocol(self):
-        # print 'STOPPED ptcp'
+    def _finalCleanup(self):
+        """
+        Clean up all of our connections by issuing application-level close and
+        stop notifications, sending hail-mary final FIN packets (which may not
+        reach the other end, but nevertheless can be useful) when possible.
+        """
         for conn in self._connections.values():
-            conn._stopRetransmitting()
+            conn.immediateShutdown()
+        assert not self._connections
+
+    def stopProtocol(self):
+        """
+        Notification from twisted that our underlying port has gone away;
+        make sure we're not going to try to send any packets through our
+        transport and blow up, then shut down all of our protocols, issuing
+        appr
+        opriate application-level messages.
+        """
+        self.transportGoneAway = True
+        self._finalCleanup()
+
+    def cleanupAndClose(self):
+        """
+        Clean up all remaining connections, then close our transport.
+
+        Although in a pinch we will do cleanup after our socket has gone away
+        (if it does so unexpectedly, above in stopProtocol), we would really
+        prefer to do cleanup while we still have access to a transport, since
+        that way we can force out a few final packets and save the remote
+        application an awkward timeout (if it happens to get through, which
+        is generally likely).
+        """
+        self._finalCleanup()
+        return self._stop()
 
     def datagramReceived(self, bytes, addr):
         if len(bytes) < _fixedSize:
             # It can't be any good.
             return
 
-        pkt = PtcpPacket.decode(bytes, addr)
-
-        # print 'Packet received from', addr, ':', pkt
+        pkt = PTCPPacket.decode(bytes, addr)
 
         if pkt.dlen > len(pkt.data):
             self.sendPacket(
-                PtcpPacket.create(
+                PTCPPacket.create(
                     pkt.destPseudoPort,
                     pkt.sourcePseudoPort,
                     0,
@@ -808,11 +881,39 @@ class Ptcp(protocol.DatagramProtocol):
         else:
             self.packetReceived(pkt)
 
+    stopped = False
+    def _stop(self, result=None):
+        if not self.stopped:
+            self.stopped = True
+            return self.transport.stopListening()
+        else:
+            return defer.succeed(None)
+
+    def waitForAllConnectionsToClose(self):
+        """
+        Wait for all currently-open connections to enter the 'CLOSED' state.
+        Currently this is only usable from test fixtures.
+        """
+        if not self._connections:
+            return self._stop()
+        return self._allConnectionsClosed.deferred().addBoth(self._stop)
+
+    def connectionClosed(self, ptcpConn):
+        packey = (ptcpConn.peerPseudoPort, ptcpConn.hostPseudoPort,
+                  ptcpConn.peerAddressTuple)
+        del self._connections[packey]
+        if ((not self.transportGoneAway) and
+            (not self._connections) and
+            self.factory is None):
+            self._stop()
+        if not self._connections:
+            self._allConnectionsClosed.callback(None)
+
     def packetReceived(self, packet):
         packey = (packet.sourcePseudoPort, packet.destPseudoPort, packet.peerAddressTuple)
         if packey not in self._connections:
             if packet.flags == _SYN and packet.destPseudoPort == 1: # SYN and _ONLY_ SYN set.
-                conn = PtcpConnection(packet.destPseudoPort,
+                conn = PTCPConnection(packet.destPseudoPort,
                                       packet.sourcePseudoPort, self,
                                       self.factory, packet.peerAddressTuple)
                 conn.input(tcpdfa.APP_PASSIVE_OPEN)
@@ -823,6 +924,6 @@ class Ptcp(protocol.DatagramProtocol):
         try:
             self._connections[packey].packetReceived(packet)
         except:
-            log.msg("PtcpConnection error on %r:" % (packet,))
+            log.msg("PTCPConnection error on %r:" % (packet,))
             log.err()
             del self._connections[packey]

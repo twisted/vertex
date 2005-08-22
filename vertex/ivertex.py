@@ -44,7 +44,7 @@ class IFileTransfer(Interface):
             {'name': str,
              'size': int,
              'type': vertex.filexfer.MIMEType,
-             'modified': axiom.extime.Time}
+             'modified': epsilon.extime.Time}
         """
 
 class ISessionTokenStorage(Interface):

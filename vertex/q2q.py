@@ -17,8 +17,10 @@ from twisted.python import log
 from twisted.python.failure import Failure
 from twisted.application import service
 
-# atop
-from axiom.extime import Time
+# epsilon
+from epsilon.extime import Time
+
+# axiom
 from axiom.slotmachine import _structlike
 
 # vertex
@@ -2018,10 +2020,6 @@ class AddressDiscoveryProtocol(Q2QBootstrap):
     def connectionMade(self):
         self.whoami().chainDeferred(self.addrDiscDef)
 
-    def connectionLost(self, reason):
-        if self.addrDiscDef is not None:
-            self.addrDiscDef.errback(reason)
-
 class _AddressDiscoveryFactory(protocol.ClientFactory):
     def __init__(self, addressDiscoveredDeferred):
         self.addressDiscoveredDeferred = addressDiscoveredDeferred
@@ -2052,7 +2050,8 @@ class PTCPConnectionDispatcher(object):
                 if conditional:
                     return None
                 else:
-                    print 'tried to seed %r in %r %r %r' % (sourcePort, self, self._ports, self.factory.service)
+                    raise AssertionError('tried to seed %r in %r %r %r' %
+                                         (sourcePort, self, self._ports, self.factory.service))
             sourcePort = self.bindNewPort(sourcePort)
         else:
             assert sourcePort != 0
@@ -2061,20 +2060,18 @@ class PTCPConnectionDispatcher(object):
         return sourcePort
 
     def bindNewPort(self, portNum=0):
-        # print 'BINDING', portNum, 'to', self, self.factory.service
-        proto = ptcp.Ptcp(self.factory)
+        iPortNum = portNum
+        proto = ptcp.PTCP(self.factory)
         p = reactor.listenUDP(portNum, proto)
         portNum = p.getHost().port
-        # print '   actually', portNum
+        log.msg("Binding PTCP/UDP %d=%d" % (iPortNum,portNum))
         self._ports[portNum] = (p, proto)
         return portNum
 
     def unbindPort(self, portNum):
-        # print 'UNBINDING', portNum, 'from', self, self._ports
-        port, proto = self._ports[portNum]
-        # proto._stopRetransmitting()
-        # port.stopListening()
-        # del self._ports[portNum]
+        log.msg("Unbinding PTCP/UDP %d" % portNum)
+        port, proto = self._ports.pop(portNum)
+        proto.cleanupAndClose()
 
     def connectPTCP(self, host, port, factory, sourcePort):
         p, proto = self._ports[sourcePort]

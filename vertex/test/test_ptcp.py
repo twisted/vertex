@@ -84,8 +84,12 @@ class ConnectedPTCPMixin:
         cf = Django()
         cf.protocol = lambda: clientProto
 
-        serverTransport = ptcp.Ptcp(sf)
-        clientTransport = ptcp.Ptcp(None)
+        serverTransport = ptcp.PTCP(sf)
+        clientTransport = ptcp.PTCP(None)
+
+        self.serverTransport = serverTransport
+        self.clientTransport = clientTransport
+
         serverPort = reactor.listenUDP(0, serverTransport)
         clientPort = reactor.listenUDP(0, clientTransport)
 
@@ -99,15 +103,13 @@ class ConnectedPTCPMixin:
             serverPort, clientPort
             )
 
-
     def tearDown(self):
-        if self.serverPort is not None:
-            self.serverPort.stopListening()
-            self.clientPort.stopListening()
-            for p in self.serverProto, self.clientProto:
-                if p.transport is not None:
-                    p.transport._stopRetransmitting()
+        td = []
 
+        for ptcp in (self.serverTransport, self.clientTransport):
+            td.append(ptcp.waitForAllConnectionsToClose())
+        d = defer.DeferredList(td)
+        return d
 
 
 class TestProducerProtocol(protocol.Protocol):
@@ -143,16 +145,16 @@ class TestProducerProtocol(protocol.Protocol):
             # print 'Unregistering'
             self.transport.unregisterProducer()
 
-class PtcpTransportTestCase(ConnectedPTCPMixin, unittest.TestCase):
+class PTCPTransportTestCase(ConnectedPTCPMixin, unittest.TestCase):
     def setUpClass(self):
-        ptcp.PtcpConnection._retransmitTimeout /= 10
-        ptcp.PtcpPacket.retransmitCount *= 10
+        ptcp.PTCPConnection._retransmitTimeout /= 10
+        ptcp.PTCPPacket.retransmitCount *= 10
 
     def tearDownClass(self):
-        ptcp.PtcpConnection._retransmitTimeout *= 10
-        ptcp.PtcpPacket.retransmitCount /= 10
+        ptcp.PTCPConnection._retransmitTimeout *= 10
+        ptcp.PTCPPacket.retransmitCount /= 10
 
-    def testWhoAmI(self):
+    def xtestWhoAmI(self):
         (serverProto, clientProto,
          sf, cf,
          serverTransport, clientTransport,
@@ -173,7 +175,7 @@ class PtcpTransportTestCase(ConnectedPTCPMixin, unittest.TestCase):
 
         return defer.DeferredList([serverProto.onConnect, clientProto.onConnect]).addCallback(connectionsMade)
 
-    testWhoAmI.skip = 'arglebargle'
+    #testWhoAmI.skip = 'arglebargle'
 
     def testVerySimpleConnection(self):
         (serverProto, clientProto,
@@ -243,6 +245,7 @@ class PtcpTransportTestCase(ConnectedPTCPMixin, unittest.TestCase):
 
         def cbBytes(ignored):
             self.failUnless(resumed)
+            clientProto.transport.loseConnection()
 
         def cbConnect(ignored):
             BYTES = 'Here are bytes'
@@ -268,6 +271,7 @@ class PtcpTransportTestCase(ConnectedPTCPMixin, unittest.TestCase):
         def cbPaused(ignored):
             # print 'Paused'
             paused.append(True)
+            # print 'RESUMING', clientProto, clientTransport, clientPort
             clientProto.transport.resumeProducing()
         serverProto.onPaused.addCallback(cbPaused)
 
@@ -285,6 +289,7 @@ class PtcpTransportTestCase(ConnectedPTCPMixin, unittest.TestCase):
             serverProto.WRITE_SIZE = serverProto.transport.sendWindow * 5
 
             # print 'Connected'
+            # print 'PAUSING CLIENT PROTO', clientProto, clientTransport, clientPort
             clientProto.transport.pauseProducing()
             return clientProto.onDisconn.addCallback(cbBytes)
 
@@ -294,27 +299,27 @@ class PtcpTransportTestCase(ConnectedPTCPMixin, unittest.TestCase):
         return connD
 
 
-class LossyTransportTestCase(PtcpTransportTestCase):
+class LossyTransportTestCase(PTCPTransportTestCase):
     def setUpForATest(self, *a, **kw):
-        results = PtcpTransportTestCase.setUpForATest(self, *a, **kw)
+        results = PTCPTransportTestCase.setUpForATest(self, *a, **kw)
         results[-2].write = reallyLossy(results[-2].write)
         results[-1].write = reallyLossy(results[-1].write)
         return results
 
 
-class SmallMTUTransportTestCase(PtcpTransportTestCase):
+class SmallMTUTransportTestCase(PTCPTransportTestCase):
     def setUpForATest(self, *a, **kw):
-        results = PtcpTransportTestCase.setUpForATest(self, *a, **kw)
+        results = PTCPTransportTestCase.setUpForATest(self, *a, **kw)
         results[-2].write = insufficientTransmitter(results[-2].write, 128)
         results[-1].write = insufficientTransmitter(results[-1].write, 128)
         return results
 
 class TimeoutTestCase(ConnectedPTCPMixin, unittest.TestCase):
     def setUpClass(self):
-        ptcp.PtcpConnection._retransmitTimeout /= 10
+        ptcp.PTCPConnection._retransmitTimeout /= 10
 
     def tearDownClass(self):
-        ptcp.PtcpConnection._retransmitTimeout *= 10
+        ptcp.PTCPConnection._retransmitTimeout *= 10
 
     def testConnectTimeout(self):
         (serverProto, clientProto,
@@ -335,6 +340,12 @@ class TimeoutTestCase(ConnectedPTCPMixin, unittest.TestCase):
         def cbConnected(ignored):
             serverProto.transport.ptcp.sendPacket = lambda *a, **kw: None
             clientProto.transport.write('Receive this data.')
+            serverProto.transport.write('Send this data.') # have to send data
+                                                           # or the server will
+                                                           # never time out:
+                                                           # need a
+                                                           # SO_KEEPALIVE
+                                                           # option somewhere
             return clientProto.onDisconn
 
         clientConnID = clientTransport.connect(cf, '127.0.0.1', serverPort.getHost().port)
