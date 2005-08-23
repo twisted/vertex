@@ -119,7 +119,7 @@ class Q2QAddress(object):
             resource = self.resource + '@'
         else:
             resource = ''
-        return resource + self.domain
+        return (resource + self.domain).encode('utf-8')
 
     def __repr__(self):
         return '<Q2Q at %s>' % self.__str__()

@@ -344,6 +344,7 @@ def enregister(svc, newAddress, password):
             trapit)
 
 class Q2QRegister(Options):
+    synopsis = "<new Q2Q address> <password>"
     def parseArgs(self, newaddress, password):
         self.newaddress = newaddress
         self.password = password
