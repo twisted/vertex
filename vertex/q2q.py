@@ -1138,6 +1138,10 @@ class Q2Q(juice.Juice, subproducer.SuperProducer):
                             udp_source)
                 else:
                     remoteUDPHost, remoteUDPPort = udp_source
+                    log.msg(
+                        "remote PTCP: %s:%d, "
+                        "local public IP: %s, local private IP: %s"
+                        % (remoteUDPHost, remoteUDPPort, publicIP, privateIP) )
 
                     # Seed my NAT from my shared UDP port
                     udpPort = self.service.dispatcher.seedNAT(udp_source, self.service.sharedUDPPortnum)
@@ -1581,7 +1585,8 @@ class Q2Q(juice.Juice, subproducer.SuperProducer):
                 failures = []
                 if not results:
                     return Failure(NoAttemptsMade(
-                            "there was no available path for connections"))
+                            "there was no available path for connections "
+                            "(%r->%r/%s)" % (From, to, protocolName)))
                 for succeeded, result in results:
                     if succeeded:
                         succeededAny = True
