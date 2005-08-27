@@ -1,0 +1,10 @@
+
+See: http://mathworld.wolfram.com/Vertex.html
+
+A vertex in mathematics is a location where two or more lines or edges meet.
+
+Divmod Vertex is an implementation of and interface to the Q2Q protocol.  It is
+named for a vertext because it provides a way for peers on the internet to
+establish connections with each other, e.g. to make their connection lines
+meet, regardless of intermediary interference such as network address
+translators and lack of naming information.
