@@ -2,85 +2,9 @@
 
 
 from vertex import juice
-from vertex.test import utils
+from vertex.test import iosim
 from twisted.trial import unittest
 from twisted.internet import protocol, defer
-from cStringIO import StringIO
-
-def readAndDestroy(iodata):
-    try:
-        iodata.seek(0)
-        result = iodata.read()
-        iodata.seek(0)
-        iodata.truncate()
-    except ValueError:
-        print '<bug in FileTransport, early close>'
-        result = ''
-    return result
-
-
-class IOPump:
-    """Utility to pump data between clients and servers for protocol testing.
-
-    Perhaps this is a utility worthy of being in protocol.py?
-    """
-    def __init__(self, client, server, clientIO, serverIO, debug):
-        self.client = client
-        self.server = server
-        self.clientIO = clientIO
-        self.serverIO = serverIO
-        self.debug = debug
-
-    def flush(self, debug=False):
-        """Pump until there is no more input or output.
-
-        Returns whether any data was moved.
-        """
-        result = False
-        for x in range(1000):
-            if self.pump(debug):
-                result = True
-            else:
-                break
-        else:
-            assert 0, "Too long"
-        return result
-
-
-    def pump(self, debug=False):
-        """Move data back and forth.
-
-        Returns whether any data was moved.
-        """
-        sData = readAndDestroy(self.serverIO)
-        cData = readAndDestroy(self.clientIO)
-        self.client.transport._checkProducer()
-        self.server.transport._checkProducer()
-        if self.debug or debug:
-            print '.'
-            # XXX slightly buggy in the face of incremental output
-            if cData:
-                for line in cData.split('\r\n'):
-                    print 'C: '+line
-            if sData:
-                for line in sData.split('\r\n'):
-                    print 'S: '+line
-        if cData:
-            self.server.dataReceived(cData)
-        if sData:
-            self.client.dataReceived(sData)
-        if self.server.transport.disconnecting and not self.server.transport.disconnected:
-            if self.debug or debug:
-                print '* C'
-            self.server.transport.disconnected = True
-            self.client.connectionLost(None)
-        if self.client.transport.disconnecting and not self.client.transport.disconnected:
-            if self.debug or debug:
-                print '* S'
-            self.client.transport.disconnected = True
-            self.server.connectionLost(None)
-        return bool(cData or sData)
-
 
 class TestProto(protocol.Protocol):
     def __init__(self, onConnLost, dataToSend):
@@ -191,21 +115,12 @@ class SSCF(SSPF, protocol.ClientFactory): pass
 
 def connectedServerAndClient(ServerClass=lambda: SimpleSymmetricProtocol(True),
                              ClientClass=lambda: SimpleSymmetricProtocol(False),
-                             clientTransportWrapper=utils.FileWrapper,
-                             serverTransportWrapper=utils.FileWrapper,
-                             debug=False):
+                             *a, **kw):
     """Returns a 3-tuple: (client, server, pump)
     """
-    c = ClientClass()
-    s = ServerClass()
-    cio = StringIO()
-    sio = StringIO()
-    c.makeConnection(clientTransportWrapper(cio))
-    s.makeConnection(serverTransportWrapper(sio))
-    pump = IOPump(c, s, cio, sio, debug)
-    # kick off server greeting, etc
-    pump.flush()
-    return c, s, pump
+    return iosim.connectedServerAndClient(
+        ServerClass, ClientClass,
+        *a, **kw)
 
 class TotallyDumbProtocol(protocol.Protocol):
     buf = ''

@@ -13,7 +13,7 @@ from twisted.trial import unittest
 from vertex.q2q import Q2QAddress
 from vertex import sigma
 
-from vertex.test.test_juice import IOPump
+from vertex.test.iosim import IOPump
 from vertex.test.mock_data import data as TEST_DATA
 
 class FakeQ2QTransport(FileWrapper):
