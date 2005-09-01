@@ -115,6 +115,14 @@ class QuitBox(JuiceBox):
         super(QuitBox, self).sendTo(proto)
         proto.transport.loseConnection()
 
+class _SwitchBox(JuiceBox):
+    def __init__(self, __proto, **kw):
+        super(_SwitchBox, self).__init__(**kw)
+        self.innerProto = __proto
+
+    def sendTo(self, proto):
+        super(_SwitchBox, self).sendTo(proto)
+        proto._switchTo(self.innerProto)
 
 class NegotiateBox(JuiceBox):
     def sendTo(self, proto):
@@ -187,11 +195,11 @@ class DispatchMixin:
             kw = stringsToObjects(box, command.arguments, proto)
             for name, extraArg in command.extra:
                 kw[name] = extraArg.fromTransport(proto.transport)
-            def checkIsDict(result):
-                if not isinstance(result, dict):
-                    raise RuntimeError("%r returned %r, not dictionary" % (
-                            aCallable, result))
-                return result
+#             def checkIsDict(result):
+#                 if not isinstance(result, dict):
+#                     raise RuntimeError("%r returned %r, not dictionary" % (
+#                             aCallable, result))
+#                 return result
             def checkKnownErrors(error):
                 key = error.trap(*command.allErrors)
                 code = command.allErrors[key]
@@ -641,6 +649,7 @@ class Command:
             d[name] = extraArg.fromTransport(transport)
         return d
 
+
 class ProtocolSwitchCommand(Command):
     """Use this command to switch from something Juice-derived to a different
     protocol mid-connection.  This can be useful to use juice as the
@@ -654,12 +663,17 @@ class ProtocolSwitchCommand(Command):
         self.protoToSwitchToFactory = __protoToSwitchToFactory
         super(ProtocolSwitchCommand, self).__init__(**kw)
 
+    def makeResponse(cls, innerProto, proto):
+        return _SwitchBox(innerProto)
+
+    makeResponse = classmethod(makeResponse)
+
     def do(self, proto, namespace=None):
         d = super(ProtocolSwitchCommand, self).do(proto)
         proto._lock()
         def switchNow(ign):
             innerProto = self.protoToSwitchToFactory.buildProtocol(proto.transport.getPeer())
-            proto.switchTo(innerProto, self.protoToSwitchToFactory)
+            proto._switchTo(innerProto, self.protoToSwitchToFactory)
             return ign
         def die(ign):
             proto.transport.loseConnection()
@@ -737,25 +751,17 @@ class Juice(LineReceiver, JuiceParserBase):
 
     innerProtocol = None
 
-    def switchTo(self, newProto, clientFactory=None):
+    def _switchTo(self, newProto, clientFactory=None):
         """ Switch this Juice instance to a new protocol.  You need to do this
         'simultaneously' on both ends of a connection; the easiest way to do
-        this is to use a subclass of ProtocolSwitchCommand on one side, and on
-        the other side call this method in the resposne to that command.
-
-        CAUTION: using Deferreds in conjunection with this method is possible
-        in principle but likely to be _highly confusing_.  Please do not do it
-        unless you are familiar with Juice's internals.
-
-        The optional second argument is generally not necessary when passing
-        from application code, as it specifies a client factory to notify with
-        clientConnectionLost when the client's connection is lost.  If you are
-        dealing with the client half of switchTo, use a ProtocolSwitchCommand.
+        this is to use a subclass of ProtocolSwitchCommand.
         """
 
         assert self.innerProtocol is None, "Protocol can only be safely switched once."
+        self.setRawMode()
         self.innerProtocol = newProto
         self.innerProtocolClientFactory = clientFactory
+        newProto.makeConnection(self.transport)
 
     innerProtocolClientFactory = None
 
@@ -878,9 +884,6 @@ class Juice(LineReceiver, JuiceParserBase):
                 self.setRawMode()
             else:
                 self.juiceBoxReceived(b)
-                if self.innerProtocol is not None:
-                    self.innerProtocol.makeConnection(self.transport)
-                    self.setRawMode()
 
     def rawDataReceived(self, data):
         if self.innerProtocol is not None:

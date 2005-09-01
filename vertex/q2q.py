@@ -1736,13 +1736,12 @@ class Q2QBootstrap(juice.Juice):
             raise KeyError(identifier)
         else:
             proto = listenerInfo.protocolFactory.buildProtocol(listenerInfo.From)
-            self.switchTo(SeparateConnectionTransport(
+            return SeparateConnectionTransport(
                     self.service,
                     proto,
                     listenerInfo.to,
                     listenerInfo.From,
-                    listenerInfo.protocolName))
-            return {}
+                    listenerInfo.protocolName)
 
     command_RETRIEVE_CONNECTION.command = RetrieveConnection
 

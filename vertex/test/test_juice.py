@@ -78,6 +78,7 @@ class SingleUseFactory(protocol.ClientFactory):
         return p
 
 class SimpleSymmetricCommandProtocol(juice.Juice):
+    maybeLater = None
     def __init__(self, issueGreeting, onConnLost=None):
         juice.Juice.__init__(self, issueGreeting)
         self.onConnLost = onConnLost
@@ -104,10 +105,21 @@ class SimpleSymmetricCommandProtocol(juice.Juice):
 
     def command_SWITCH_PROTO(self, name):
         if name == 'test-proto':
-            self.switchTo(TestProto(self.onConnLost, SWITCH_SERVER_DATA))
-            return {}
+            return TestProto(self.onConnLost, SWITCH_SERVER_DATA)
         raise UnknownProtocol(name)
+
     command_SWITCH_PROTO.command = TestSwitchProto
+
+class DeferredSymmetricCommandProtocol(SimpleSymmetricCommandProtocol):
+    def command_SWITCH_PROTO(self, name):
+        if name == 'test-proto':
+            self.maybeLaterProto = TestProto(self.onConnLost, SWITCH_SERVER_DATA)
+            self.maybeLater = defer.Deferred()
+            return self.maybeLater
+        raise UnknownProtocol(name)
+
+    command_SWITCH_PROTO.command = TestSwitchProto
+
 
 class SSPF: protocol = SimpleSymmetricProtocol
 class SSSF(SSPF, protocol.ServerFactory): pass
@@ -242,13 +254,13 @@ class AppLevelTest(unittest.TestCase):
         self.assertEquals(c.protocolVersion, 1)
         self.assertEquals(s.protocolVersion, 1)
 
-    def testProtocolSwitch(self):
+    def testProtocolSwitch(self, switcher=SimpleSymmetricCommandProtocol):
         self.testSucceeded = False
 
         serverDeferred = defer.Deferred()
-        serverProto = SimpleSymmetricCommandProtocol(True, serverDeferred)
+        serverProto = switcher(True, serverDeferred)
         clientDeferred = defer.Deferred()
-        clientProto = SimpleSymmetricCommandProtocol(False, clientDeferred)
+        clientProto = switcher(False, clientDeferred)
         c, s, p = connectedServerAndClient(ServerClass=lambda: serverProto,
                                            ClientClass=lambda: clientProto)
 
@@ -266,4 +278,10 @@ class AppLevelTest(unittest.TestCase):
 
         switchDeferred.addCallback(cbSwitch)
         p.flush()
+        if serverProto.maybeLater is not None:
+            serverProto.maybeLater.callback(serverProto.maybeLaterProto)
+            p.flush()
         self.failUnless(self.testSucceeded)
+
+    def testProtocolSwitchDeferred(self):
+        return self.testProtocolSwitch(switcher=DeferredSymmetricCommandProtocol)
