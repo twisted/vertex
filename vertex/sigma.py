@@ -636,8 +636,8 @@ class BaseNexusUI:
     def receivedIntroduction(self, peer, name):
         self.receivedIntroductions += 1
 
-    def startTransload(self, sharename, firstPeer):
-        tl = self.transloadFactory(self, sharename, firstPeer)
+    def startTransload(self, *a, **kw):
+        tl = self.transloadFactory(self, *a, **kw)
         self.transloads.append(tl)
         return tl
 
