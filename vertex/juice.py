@@ -454,7 +454,7 @@ class ListOf(Argument):
 
     def fromStringProto(self, inString, proto):
         strings = inString.split(self.delimiter)
-        L = [self.subarg.fromStringProto(inString, proto)
+        L = [self.subarg.fromStringProto(string, proto)
              for string in strings]
         return L
 
