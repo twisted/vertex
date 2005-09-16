@@ -2439,7 +2439,7 @@ class Q2QService(service.MultiService, protocol.ServerFactory):
 
     def connectQ2Q(self, fromAddress, toAddress, protocolName, protocolFactory,
                    usePrivateCertificate=None, fakeFromDomain=None,
-                   chooser=lambda x: x and [x[0]]):
+                   chooser=None):
         """ Connect a named protocol factory from a resource@domain to a
         resource@domain.
 
@@ -2504,7 +2504,11 @@ class Q2QService(service.MultiService, protocol.ServerFactory):
         objects and returning another list.  Those items in the remaining list
         will be attempted as connections and buildProtocol called on the client
         factory.  May return a Deferred.
+
+        @default chooser: C{lambda x: x and [x[0]]}
         """
+        if chooser is None:
+            chooser = lambda x: x and [x[0]]
 
         def onSecureConnection(protocol):
             if fakeFromDomain:
