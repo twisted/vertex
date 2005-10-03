@@ -670,4 +670,3 @@ class OpenSSLCertificateOptions(object):
             ctx.set_session_id(sessionName)
 
         return ctx
-
