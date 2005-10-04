@@ -2155,7 +2155,7 @@ class Q2QService(service.MultiService, protocol.ServerFactory):
             certificateStorage = DefaultCertificateStore()
         self.certificateStorage = certificateStorage
 
-        # atop thingy for protocols to wrap everything in transactions.
+        # allow protocols to wrap message handlers in transactions.
         self.wrapper = wrapper
 
         # clients which have registered for network events: maps {(q2q_id,
