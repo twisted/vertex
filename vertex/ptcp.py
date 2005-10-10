@@ -529,6 +529,9 @@ class PTCPConnection(tcpdfa.TCP):
         if self._nagle is not None:
             self._nagle.cancel()
             self._nagle = None
+        if self._closeWaitLoseConnection is not None:
+            self._closeWaitLoseConnection.cancel()
+            self._closeWaitLoseConnection = None
 
     def _reallyRetransmit(self):
         # XXX TODO: packet fragmentation & coalescing.
@@ -742,11 +745,16 @@ class PTCPConnection(tcpdfa.TCP):
             self.producer = None
 
 
+    _closeWaitLoseConnection = None
+
     def enter_CLOSE_WAIT(self):
         # Twisted automatically reacts to network half-close by issuing a full
         # close.
-        reactor.callLater(0.01, self.loseConnection)
+        self._closeWaitLoseConnection = reactor.callLater(0.01, self._loseConnectionBecauseOfCloseWait)
 
+    def _loseConnectionBecauseOfCloseWait(self):
+        self._closeWaitLoseConnection = None
+        self.loseConnection()
 
     def immediateShutdown(self):
         """_IMMEDIATELY_ shut down this connection, sending one (non-retransmitted)

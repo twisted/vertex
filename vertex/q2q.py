@@ -1523,7 +1523,6 @@ class Q2Q(juice.Juice, subproducer.SuperProducer):
                 return theResult.subProtocol
             else:
                 reason = Failure(AttemptsFailed([fobj for (f, fobj) in results]))
-                protocolFactory.clientConnectionFailed(None, reason)
                 return reason
 
         d.addCallback(gotResults)

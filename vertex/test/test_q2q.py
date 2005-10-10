@@ -349,7 +349,7 @@ class Q2QConnectionTestCase(unittest.TestCase):
     def tearDown(self):
         reactor.installResolver(self._oldResolver)
         del reactor.connectTCP
-        util.wait(self.msvc.stopService())
+        return self.msvc.stopService()
         # log.clearIgnores()
 
 class ConnectionTestMixin:
@@ -360,8 +360,7 @@ class ConnectionTestMixin:
                                       self.toAddress,
                                       'pony',
                                       OneTrickPonyClientFactory(ponged))
-        answerBox = util.wait(ponged)
-        self.failUnless('tricked' in answerBox)
+        return ponged.addCallback(lambda answerBox: self.failUnless('tricked' in answerBox))
 
     def addClientService(self, toAddress, secret, serverService):
         return self._addClientService(
@@ -491,23 +490,26 @@ class ConnectionTestMixin:
         self.failUnless(self.streamer.resumeCount > 0)
 
     def testBadIssuerOnSelfSignedCert(self):
-        self.testConnectWithIntroduction()
-        ponged = defer.Deferred()
-        signer = self.serverService2.certificateStorage.getPrivateCertificate(
-            self.fromDomain).privateKey
-        req = signer.requestObject(sslverify.DN(commonName=self.toDomain))
-        sreq = signer.signRequestObject(sslverify.DN(commonName=self.fromDomain),
-                                                   req, 12345)
-        selfSignedLie = sslverify.PrivateCertificate.fromCertificateAndKeyPair(
-            sreq, signer)
-        self.serverService2.connectQ2Q(self.fromAddress,
-                                      self.toAddress,
-                                      'pony',
-                                      OneTrickPonyClientFactory(ponged),
-                                      selfSignedLie,
-                                      fakeFromDomain=self.toDomain).addErrback(
-            lambda e: e.trap(sslverify.VerifyError))
-        answerBox = self.assertRaises(sslverify.VerifyError, util.wait, ponged)
+        x = self.testConnectWithIntroduction()
+        def actualTest(result):
+            ponged = defer.Deferred()
+            signer = self.serverService2.certificateStorage.getPrivateCertificate(
+                self.fromDomain).privateKey
+            req = signer.requestObject(sslverify.DN(commonName=self.toDomain))
+            sreq = signer.signRequestObject(sslverify.DN(commonName=self.fromDomain),
+                                                       req, 12345)
+            selfSignedLie = sslverify.PrivateCertificate.fromCertificateAndKeyPair(
+                sreq, signer)
+            self.serverService2.connectQ2Q(self.fromAddress,
+                                          self.toAddress,
+                                          'pony',
+                                          OneTrickPonyClientFactory(ponged),
+                                          selfSignedLie,
+                                          fakeFromDomain=self.toDomain).addErrback(
+                lambda e: e.trap(sslverify.VerifyError))
+
+            return self.assertFailure(ponged, sslverify.VerifyError)
+        return x.addCallback(actualTest)
 
 
     def testBadCertRequestSubject(self):
