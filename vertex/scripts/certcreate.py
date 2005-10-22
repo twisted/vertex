@@ -16,7 +16,9 @@ class Options(usage.Options):
         ["hostname", "h", "divmod.com", None],
         ["email", "e", "support@divmod.org", None],
 
-        ["filename", "f", "server.pem", "Name of the file to which to write the PEM."]]
+        ["filename", "f", "server.pem", "Name of the file to which to write the PEM."],
+        ["serial-number", "S", 1, None],
+    ]
 
 def createSSLCertificate(opts):
     sslopt = {}
@@ -28,7 +30,8 @@ def createSSLCertificate(opts):
                  ('hostname', 'CN'),
                  ('email','emailAddress')):
         sslopt[y] = opts[x]
-    ssc = sslverify.KeyPair.generate().selfSignedCert(1,**sslopt)
+    serialNumber = int(opts['serialNumber'])
+    ssc = sslverify.KeyPair.generate().selfSignedCert(serialNumber,**sslopt)
     file(opts['filename'], 'w').write(ssc.dumpPEM())
     print 'Wrote SSL certificate:'
     print ssc.inspect()
