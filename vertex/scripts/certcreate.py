@@ -30,8 +30,8 @@ def createSSLCertificate(opts):
                  ('hostname', 'CN'),
                  ('email','emailAddress')):
         sslopt[y] = opts[x]
-    serialNumber = int(opts['serialNumber'])
-    ssc = sslverify.KeyPair.generate().selfSignedCert(serialNumber,**sslopt)
+    serialNumber = int(opts['serial-number'])
+    ssc = sslverify.KeyPair.generate().selfSignedCert(serialNumber, **sslopt)
     file(opts['filename'], 'w').write(ssc.dumpPEM())
     print 'Wrote SSL certificate:'
     print ssc.inspect()
