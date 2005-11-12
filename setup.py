@@ -6,7 +6,7 @@ setup(
     version="0.1",
     maintainer="Divmod, Inc.",
     maintainer_email="support@divmod.org",
-    url="http://divmod.org/trac/wiki/VertexProject",
+    url="http://divmod.org/trac/wiki/DivmodVertex",
     license="MIT",
     platforms=["any"],
     description="A Q2Q protocol implementation",
