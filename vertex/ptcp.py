@@ -1,6 +1,10 @@
 # -*- test-case-name: vertex.test.test_ptcp -*-
 
-import struct, zlib
+import struct
+
+from binascii import crc32  # used to use zlib.crc32 - but that gives different
+                            # results on 64-bit platforms!!
+
 import itertools
 
 from epsilon.pending import PendingEvent
@@ -25,7 +29,7 @@ _packetFormat = ('!' # WTF did you think
                  'L' # window
                  'B' # flags
                  'l' # checksum
-                     # (signed because of crc32 module)
+                     # (signed because of binascii.crc32)
                  'H' # dlen
                  )
 _fixedSize = struct.calcsize(_packetFormat)
@@ -154,18 +158,26 @@ class PTCPPacket(util.FancyStrMixin, object):
 
 
     def verifyChecksum(self):
-        return len(self.data) == self.dlen and self.checksum == self.computeChecksum()
-
+        if len(self.data) != self.dlen:
+            if len(self.data) > self.dlen:
+                raise GarbageDataError(self)
+            else:
+                raise TruncatedDataError(self)
+        expected = self.computeChecksum()
+        received = self.checksum
+        if expected != received:
+            raise ChecksumMismatchError(expected, received)
 
     def computeChecksum(self):
-        return zlib.crc32(self.data)
+        return crc32(self.data)
 
     def decode(cls, bytes, hostPortPair):
         fields = struct.unpack(_packetFormat, bytes[:_fixedSize])
         sourcePseudoPort, destPseudoPort, seq, ack, window, flags, checksum, dlen = fields
         data = bytes[_fixedSize:]
-        return cls(sourcePseudoPort, destPseudoPort, seq, ack, window, flags,
-                   checksum, dlen, data, hostPortPair)
+        pkt = cls(sourcePseudoPort, destPseudoPort, seq, ack, window, flags,
+                  checksum, dlen, data, hostPortPair)
+        return pkt
     decode = classmethod(decode)
 
     def mustRetransmit(self):
@@ -242,6 +254,22 @@ def segmentAcceptable(RCV_NXT, RCV_WND, SEG_SEQ, SEG_LEN):
 
 class BadPacketError(Exception):
     """
+    A packet was bad for some reason.
+    """
+
+class ChecksumMismatchError(Exception):
+    """
+    The checksum and data received did not match.
+    """
+
+class TruncatedDataError(Exception):
+    """
+    The packet was truncated in transit, and all of the data did not arrive.
+    """
+
+class GarbageDataError(Exception):
+    """
+    Too much data was received (???)
     """
 
 class PTCPConnection(tcpdfa.TCP):
@@ -870,8 +898,10 @@ class PTCP(protocol.DatagramProtocol):
             return
 
         pkt = PTCPPacket.decode(bytes, addr)
-
-        if pkt.dlen > len(pkt.data):
+        try:
+            pkt.verifyChecksum()
+        except TruncatedDataError:
+            print '(ptcp packet truncated: %r)' % (pkt,)
             self.sendPacket(
                 PTCPPacket.create(
                     pkt.destPseudoPort,
@@ -881,9 +911,10 @@ class PTCP(protocol.DatagramProtocol):
                     struct.pack('!H', len(pkt.data)),
                     stb=True,
                     destination=addr))
-        elif not pkt.verifyChecksum():
-            print "bad packet", pkt
-            print pkt.dlen, len(pkt.data)
+        except GarbageDataError:
+            print "garbage data!", pkt
+        except ChecksumMismatchError, cme:
+            print "bad checksum", pkt, cme
             print repr(pkt.data)
             print hex(pkt.checksum), hex(pkt.computeChecksum())
         else:

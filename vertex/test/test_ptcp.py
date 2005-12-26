@@ -3,7 +3,7 @@
 import itertools, random, os
 
 from twisted.internet import reactor, protocol, defer, task, error
-from twisted.trial import unittest, assertions
+from twisted.trial import unittest
 
 from vertex import ptcp
 
@@ -329,7 +329,7 @@ class TimeoutTestCase(ConnectedPTCPMixin, unittest.TestCase):
 
         clientTransport.sendPacket = lambda *a, **kw: None
         clientConnID = clientTransport.connect(cf, '127.0.0.1', serverPort.getHost().port)
-        return assertions.assertFailure(cf.onConnect, error.TimeoutError)
+        return cf.onConnect.addBoth(lambda result: result.trap(error.TimeoutError) and None)
 
     def testDataTimeout(self):
         (serverProto, clientProto,
