@@ -99,7 +99,7 @@ class OpenSSLOptions(unittest.TestCase):
         if self.onClientLost is not None:
             L.append(self.onClientLost)
 
-        util.wait(defer.DeferredList(L, consumeErrors=True))
+        return defer.DeferredList(L, consumeErrors=True)
 
     def loopback(self, serverCertOpts, clientCertOpts,
                  onServerLost=None, onClientLost=None, onData=None):
@@ -140,8 +140,8 @@ class OpenSSLOptions(unittest.TestCase):
                       sslverify.OpenSSLCertificateOptions(requireCertificate=False),
                       onData=onData)
 
-        result = util.wait(onData)
-        self.assertEquals(result, WritingProtocol.byte)
+        return onData.addCallback(
+            lambda result: self.assertEquals(result, WritingProtocol.byte))
 
     def testRefusedAnonymousClientConnection(self):
         onServerLost = defer.Deferred()
@@ -152,22 +152,20 @@ class OpenSSLOptions(unittest.TestCase):
                       onClientLost=onClientLost)
 
         d = defer.DeferredList([onClientLost, onServerLost], consumeErrors=True)
-        (cSuccess, cResult), (sSuccess, sResult) = util.deferredResult(d)
 
-        self.failIf(cSuccess)
-        self.failIf(sSuccess)
 
-        # XXX Twisted doesn't report SSL errors as SSL errors, but in the
-        # future it will.
+        def afterLost(((cSuccess, cResult), (sSuccess, sResult))):
 
-        # cResult.trap(SSL.Error)
-        # sResult.trap(SSL.Error)
+            self.failIf(cSuccess)
+            self.failIf(sSuccess)
 
-        # XXX So instead for now, we flush errors that got logged so the test
-        # can actually pass.
-        errors = log.flushErrors(SSL.Error)
-        # This assertion is no longer correct on Twisted trunk.
-        # self.assertEquals(len(errors), 2)
+            # XXX Twisted doesn't report SSL errors as SSL errors, but in the
+            # future it will.
+
+            # cResult.trap(SSL.Error)
+            # sResult.trap(SSL.Error)
+
+        return d.addCallback(afterLost)
 
     def testFailedCertificateVerification(self):
         onServerLost = defer.Deferred()
@@ -178,13 +176,12 @@ class OpenSSLOptions(unittest.TestCase):
                       onClientLost=onClientLost)
 
         d = defer.DeferredList([onClientLost, onServerLost], consumeErrors=True)
-        (cSuccess, cResult), (sSuccess, sResult) = util.deferredResult(d)
+        def afterLost(((cSuccess, cResult), (sSuccess, sResult))):
 
-        self.failIf(cSuccess)
-        self.failIf(sSuccess)
-        errors = log.flushErrors(SSL.Error)
-        # This assertion is no longer correct on Twisted trunk.
-        # self.assertEquals(len(errors), 2)
+            self.failIf(cSuccess)
+            self.failIf(sSuccess)
+
+        return d.addCallback(afterLost)
 
     def testSuccessfulCertificateVerification(self):
         onData = defer.Deferred()
@@ -192,8 +189,7 @@ class OpenSSLOptions(unittest.TestCase):
                       sslverify.OpenSSLCertificateOptions(verify=True, requireCertificate=True, caCerts=[self.sCert]),
                       onData=onData)
 
-        result = util.deferredResult(onData)
-        self.assertEquals(result, WritingProtocol.byte)
+        return onData.addCallback(lambda result: self.assertEquals(result, WritingProtocol.byte))
 
     def testSuccessfulSymmetricSelfSignedCertificateVerification(self):
         onData = defer.Deferred()
@@ -201,8 +197,7 @@ class OpenSSLOptions(unittest.TestCase):
                       sslverify.OpenSSLCertificateOptions(privateKey=self.cKey, certificate=self.cCert, verify=True, requireCertificate=True, caCerts=[self.sCert]),
                       onData=onData)
 
-        result = util.deferredResult(onData)
-        self.assertEquals(result, WritingProtocol.byte)
+        return onData.addCallback(lambda result: self.assertEquals(result, WritingProtocol.byte))
 
     def testVerification(self):
         clientDN = sslverify.DistinguishedName(commonName='client')
@@ -252,5 +247,4 @@ class OpenSSLOptions(unittest.TestCase):
                       clientOpts,
                       onData=onData)
 
-        result = util.deferredResult(onData)
-        self.assertEquals(result, WritingProtocol.byte)
+        return onData.addCallback(lambda result: self.assertEquals(result, WritingProtocol.byte))
