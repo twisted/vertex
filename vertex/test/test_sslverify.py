@@ -165,6 +165,12 @@ class OpenSSLOptions(unittest.TestCase):
             # cResult.trap(SSL.Error)
             # sResult.trap(SSL.Error)
 
+            # Twisted trunk will do the correct thing here, and not log any
+            # errors.  Twisted 2.1 will do the wrong thing.  We're flushing
+            # errors until the buildbot is updated to a reasonable facsimilie
+            # of 2.2.
+            log.flushErrors(SSL.Error)
+
         return d.addCallback(afterLost)
 
     def testFailedCertificateVerification(self):
@@ -180,6 +186,12 @@ class OpenSSLOptions(unittest.TestCase):
 
             self.failIf(cSuccess)
             self.failIf(sSuccess)
+
+            # Twisted trunk will do the correct thing here, and not log any
+            # errors.  Twisted 2.1 will do the wrong thing.  We're flushing
+            # errors until the buildbot is updated to a reasonable facsimilie
+            # of 2.2.
+            log.flushErrors(SSL.Error)
 
         return d.addCallback(afterLost)
 
