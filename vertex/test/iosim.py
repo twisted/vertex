@@ -52,6 +52,8 @@ class IOPump:
 
         Returns whether any data was moved.
         """
+        if self.debug or debug:
+            print '-- GLUG --'
         sData = readAndDestroy(self.serverIO)
         cData = readAndDestroy(self.clientIO)
         self.client.transport._checkProducer()
@@ -69,17 +71,23 @@ class IOPump:
             self.server.dataReceived(cData)
         if sData:
             self.client.dataReceived(sData)
+        if cData or sData:
+            return True
         if self.server.transport.disconnecting and not self.server.transport.disconnected:
             if self.debug or debug:
                 print '* C'
             self.server.transport.disconnected = True
+            self.client.transport.disconnecting = True
             self.client.connectionLost(None)
+            return True
         if self.client.transport.disconnecting and not self.client.transport.disconnected:
             if self.debug or debug:
                 print '* S'
             self.client.transport.disconnected = True
+            self.server.transport.disconnecting = True
             self.server.connectionLost(None)
-        return bool(cData or sData)
+            return True
+        return False
 
 
 def connectedServerAndClient(ServerClass, ClientClass,
