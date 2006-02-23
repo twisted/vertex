@@ -1,23 +1,21 @@
 # Copyright 2005 Divmod, Inc.  See LICENSE file for details
 # -*- vertex.test.test_q2q.UDPConnection -*-
 
-import os
 from cStringIO import StringIO
 
-from twisted.trial import unittest, util
+from twisted.trial import unittest
 from twisted.application import service
 from twisted.internet import reactor, protocol, defer
 from twisted.protocols import basic
 from twisted.python import log
 from twisted.python import failure
-from twisted.cred import checkers
 from twisted.internet.error import ConnectionDone
 # from twisted.internet.main import CONNECTION_DONE
 
 from zope.interface import implements
 from twisted.internet.interfaces import IResolverSimple
 
-from vertex import q2q, q2qclient, sslverify, juice
+from vertex import q2q, sslverify, juice
 def noResources(*a):
     return []
 
@@ -292,7 +290,7 @@ class Q2QConnectionTestCase(unittest.TestCase):
                        self.toAddress, name)
         self.resourceMap[resourceKey] = factory
 
-    def protocolFactoryFactory(self, *key):
+    def protocolFactoryLookup(self, *key):
         if key in self.resourceMap:
             return [(self.resourceMap[key], 'test-description')]
         return []
@@ -322,7 +320,7 @@ class Q2QConnectionTestCase(unittest.TestCase):
         # access from the client.
         self.resourceMap = {}
         self.serverService = self._makeQ2QService(self.toDomain,
-                                                  self.protocolFactoryFactory)
+                                                  self.protocolFactoryLookup)
 
         self.msvc = service.MultiService()
         self.serverService2.setServiceParent(self.msvc)
@@ -379,76 +377,83 @@ class ConnectionTestMixin:
 
 
     def testListening(self):
+        _1 = self.addClientService(self.toAddress, 'aaaa', self.serverService)
+        def _1c(_1result):
+            self.clientServerService = _1result
+            ponyFactory = OneTrickPonyServerFactory()
+            _2 = self.clientServerService.listenQ2Q(self.toAddress,
+                                                    {'pony2': ponyFactory},
+                                                    'ponies suck')
 
-        self.clientServerService = util.wait(self.addClientService(
-                self.toAddress, 'aaaa', self.serverService))
+            def _2c(ignored):
+                _3 = self.addClientService(
+                        self.fromAddress, 'bbbb', self.serverService2)
+                def _3c(_3result):
+                    self.clientClientService = _3result
 
+                    _4 = defer.Deferred()
+                    otpcf = OneTrickPonyClientFactory(_4)
+                    self.clientClientService.connectQ2Q(self.fromAddress,
+                                                        self.toAddress,
+                                                        'pony2',
+                                                        otpcf)
+                    def _4c(answerBox):
+                        T = otpcf.proto.transport
+                        self.assertEquals(T.getQ2QPeer(), self.toAddress)
+                        self.assertEquals(T.getQ2QHost(), self.fromAddress)
+                        self.failUnless('tricked' in answerBox)
 
-        ponyFactory = OneTrickPonyServerFactory()
-        ponged = defer.Deferred()
-        util.wait(self.clientServerService.listenQ2Q(self.toAddress,
-                                                {'pony2': ponyFactory},
-                                                'ponies suck'))
-
-
-        self.clientClientService = util.wait(self.addClientService(
-                self.fromAddress, 'bbbb', self.serverService2))
-        otpcf = OneTrickPonyClientFactory(ponged)
-        self.clientClientService.connectQ2Q(self.fromAddress,
-                                            self.toAddress,
-                                            'pony2',
-                                            otpcf)
-
-        answerBox = util.wait(ponged)
-
-        T = otpcf.proto.transport
-        self.assertEquals(T.getQ2QPeer(), self.toAddress)
-        self.assertEquals(T.getQ2QHost(), self.fromAddress)
-        self.failUnless('tricked' in answerBox)
+                    return _4.addCallback(_4c)
+                return _3.addCallback(_3c)
+            return _2.addCallback(_2c)
+        return _1.addCallback(_1c)
 
     def testChooserGetsThreeChoices(self):
-        ponyFactory = OneTrickPonyServerFactory()
-        self.testListening()
+
+        def actualTest(ign):
+            ponyFactory = OneTrickPonyServerFactory()
+            _1 = self.addClientService(
+                self.toAddress, 'aaaa', self.serverService)
+            def _1c(_1result):
+                self.clientServerService2 = _1result
+                # print 'ultra frack'
+
+                _2 = self.clientServerService2.listenQ2Q(self.toAddress,
+                                                         {'pony': ponyFactory},
+                                                         'ponies are weird')
+                def _2c(ign):
+                    _3 = self.clientServerService.listenQ2Q(self.toAddress,
+                                                            {'pony': ponyFactory},
+                                                            'ponies rule')
+                    def _3c(ign):
+                        expectedList = ['ponies rule', 'ponies are weird', 'test-description']
+                        def chooser(servers):
+                            self.failUnlessEqual(len(servers), 3)
+                            for server in servers:
+                                expectedList.remove(server['description'])
+                                if server['description'] == 'ponies rule':
+                                    self.assertEquals(
+                                        self.clientServerService.certificateStorage.getPrivateCertificate(str(self.toAddress)),
+                                        server['certificate'])
+                                    yield server
+
+                        ponged = defer.Deferred()
+                        _4 = self.clientClientService.connectQ2Q(
+                            self.fromAddress,
+                            self.toAddress,
+                            'pony',
+                            OneTrickPonyClientFactory(ponged),
+                            chooser=chooser)
+                        def _4c(ign):
+                            self.failUnlessEqual(expectedList, [])
+                        return _4.addCallback(_4c)
+                    return _3.addCallback(_3c)
+                return _2.addCallback(_2c)
+            return _1.addCallback(_1c)
+        return self.testListening().addCallback(actualTest)
 
         # print 'dang yo'
 
-        self.clientServerService2 = util.wait(self.addClientService(
-                self.toAddress, 'aaaa', self.serverService))
-
-        # print 'ultra frack'
-
-        util.wait(self.clientServerService2.listenQ2Q(self.toAddress,
-                                                      {'pony': ponyFactory},
-                                                      'ponies are weird'))
-
-        # print 'frack'
-
-        ponged = defer.Deferred()
-        util.wait(self.clientServerService.listenQ2Q(self.toAddress,
-                                                     {'pony': ponyFactory},
-                                                     'ponies rule'))
-
-        # print 'WAITING IS DONE'
-
-        expectedList = ['ponies rule', 'ponies are weird', 'test-description']
-        def chooser(servers):
-            self.failUnlessEqual(len(servers), 3)
-            for server in servers:
-                expectedList.remove(server['description'])
-                if server['description'] == 'ponies rule':
-                    self.assertEquals(
-                        self.clientServerService.certificateStorage.getPrivateCertificate(str(self.toAddress)),
-                        server['certificate'])
-                    yield server
-
-        util.wait(self.clientClientService.connectQ2Q(
-                self.fromAddress,
-                self.toAddress,
-                'pony',
-                OneTrickPonyClientFactory(ponged),
-                chooser=chooser))
-
-        self.failUnlessEqual(expectedList, [])
 
     def testTwoGreetings(self):
         d1 = defer.Deferred()
@@ -460,34 +465,52 @@ class ConnectionTestMixin:
                                       self.toAddress,
                                       'greet',
                                       client)
-        util.wait(defer.DeferredList([d1, d2]))
-        self.failUnless(client.greeted)
-        self.failUnless(server.greeted)
+        def _(x):
+            self.failUnless(client.greeted)
+            self.failUnless(server.greeted)
+        return defer.DeferredList([d1, d2]).addCallback(_)
 
 
     def testSendingFiles(self):
         SIZE = 1024 * 500
         self.streamer = StreamingDataFeeder(StringIO('x' * SIZE))
         self.streamer.CHUNK = 8192
-        util.wait(self.serverService2.connectQ2Q(self.fromAddress,
+        a = self.serverService2.connectQ2Q(self.fromAddress,
                                                  self.toAddress, 'eat',
-                                                 DataFeeder(StringIO('y' * SIZE))))
-        util.wait(self.serverService2.connectQ2Q(self.fromAddress,
-                                                 self.toAddress, 'eat',
-                                                 self.streamer))
+                                                 DataFeeder(StringIO('y' * SIZE)))
+        b = self.serverService2.connectQ2Q(self.fromAddress,
+                                           self.toAddress, 'eat',
+                                           self.streamer)
 
-        # self.assertEquals( len(self.serverService.liveConnections), 1)
-        # XXX currently there are 2 connections but there should only be 1: the
-        # connection cache is busted, need a separate test for that
-        for liveConnection in self.serverService.iterconnections():
-            liveConnection.transport.pauseProducing()
-        wfc = self.dataEater.waitForCount(SIZE * 2)
-        self.assertRaises(defer.TimeoutError, util.wait, wfc, timeout=3)
-        for liveConnection in self.serverService.iterconnections():
-            liveConnection.transport.resumeProducing()
-        util.wait(self.dataEater.waitForCount(SIZE * 2), 30)
-        self.failUnless(self.streamer.pauseCount > 0)
-        self.failUnless(self.streamer.resumeCount > 0)
+        def dotest(ign):
+            # self.assertEquals( len(self.serverService.liveConnections), 1)
+            # XXX currently there are 2 connections but there should only be 1: the
+            # connection cache is busted, need a separate test for that
+            for liveConnection in self.serverService.iterconnections():
+                liveConnection.transport.pauseProducing()
+            wfc = self.dataEater.waitForCount(SIZE * 2)
+            resumed = [False]
+            def deferLater(n, result=None):
+                d = defer.Deferred()
+                reactor.callLater(n, d.callback, result)
+                return d
+            def shouldntHappen(x):
+                if resumed[0]:
+                    return x
+                else:
+                    self.fail("wfc fired with: " + repr(x))
+            wfc.addBoth(shouldntHappen)
+            def keepGoing(ign):
+                resumed[0] = True
+                for liveConnection in self.serverService.iterconnections():
+                    liveConnection.transport.resumeProducing()
+                def assertSomeStuff(ign):
+                    self.failUnless(self.streamer.pauseCount > 0)
+                    self.failUnless(self.streamer.resumeCount > 0)
+                return self.dataEater.waitForCount(SIZE * 2).addCallback(assertSomeStuff)
+            return deferLater(3).addCallback(keepGoing)
+        return defer.DeferredList([a, b]).addCallback(dotest)
+
 
     def testBadIssuerOnSelfSignedCert(self):
         x = self.testConnectWithIntroduction()
@@ -543,7 +566,7 @@ class ConnectionTestMixin:
         def expectedFailure(err):
             err.trap(q2q.BadCertificateRequest)
         d.addCallbacks(unexpectedSuccess, expectedFailure)
-        util.wait(d)
+        return d
 
     def testClientSideUnhandledException(self):
         d = self.serverService2.connectQ2Q(
@@ -556,7 +579,7 @@ class ConnectionTestMixin:
         d.addCallback(connected)
         d.addCallbacks(self.successIsFailure, exploded)
         d.addCallback(lambda ign: log.flushErrors(ErroneousClientError))
-        util.wait(d)
+        return d
 
     def successIsFailure(self, success):
         self.fail()
@@ -577,7 +600,7 @@ class ConnectionTestMixin:
         d.addCallback(connected)
         d.addCallbacks(self.successIsFailure, err)
         d.addCallback(lambda ign: log.flushErrors(ErroneousClientError))
-        util.wait(d)
+        return d
 
 
 
