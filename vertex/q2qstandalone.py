@@ -1,8 +1,9 @@
 # Copyright 2005 Divmod, Inc.  See LICENSE file for details
 
-import os, md5
+import os
 
-from twisted.internet import defer
+from twisted.cred.portal import Portal
+
 from vertex import juice, q2q
 from vertex.depserv import DependencyService, Conf
 from vertex.q2qadmin import AddUser, NotAllowed
@@ -34,10 +35,34 @@ class IdentityAdminFactory:
             return [(self, "identity admin")]
         return []
 
+class _usermap:
+    def __init__(self, path):
+        self.path = path
+
+    def __setitem__(self, (domain, username), password):
+        domainpath = os.path.join(self.path, domain)
+        if not os.path.exists(domainpath):
+            os.makedirs(domainpath)
+        userpath = os.path.join(domainpath, username+".info")
+        if os.path.exists(userpath):
+            raise NotAllowed()
+        f = open(userpath, 'w')
+        f.write(juice.Box(username=username,
+                          password=password.encode('hex')).serialize())
+        f.close()
+
+    def get(self, (domain, username)):
+        domainpath = os.path.join(self.path, domain)
+        if os.path.exists(domainpath):
+            filepath = os.path.join(domainpath, username+".info")
+            if os.path.exists(filepath):
+                data = juice.parseString(open(filepath).read())[0]
+                return data['password'].decode('hex')
+
 class DirectoryCertificateAndUserStore(q2q.DirectoryCertificateStore):
     def __init__(self, filepath):
         q2q.DirectoryCertificateStore.__init__(self, filepath)
-        self.userdir = os.path.join(filepath, "users")
+        self.users = _usermap(os.path.join(filepath, "users"))
 
     def getPrivateCertificate(self, domain):
         try:
@@ -49,31 +74,6 @@ class DirectoryCertificateAndUserStore(q2q.DirectoryCertificateStore):
                 raise
             self.addPrivateCertificate(domain)
         return q2q.DirectoryCertificateStore.getPrivateCertificate(self, domain)
-
-
-
-    def addUser(self, domain, username, password):
-        domainpath = os.path.join(self.userdir, domain)
-        if not os.path.exists(domainpath):
-            os.makedirs(domainpath)
-        userpath = os.path.join(domainpath, username+".info")
-        if os.path.exists(userpath):
-            raise NotAllowed()
-        f = open(userpath, 'w')
-        f.write(juice.Box(username=username,
-                          password=md5.md5(password).hexdigest()).serialize())
-        f.close()
-
-    def checkUser(self, domain, username, password):
-        domainpath = os.path.join(self.userdir, domain)
-        if os.path.exists(domainpath):
-            filepath = os.path.join(domainpath, username+".info")
-            if os.path.exists(filepath):
-                data = juice.parseString(open(filepath).read())[0]
-                if data['password'] == md5.md5(password).hexdigest():
-                    return defer.succeed(True)
-        return defer.fail(KeyError("404'd!"))
-
 
 class StandaloneQ2Q(DependencyService):
     def setup_Q2Q(self, path,
@@ -91,6 +91,7 @@ class StandaloneQ2Q(DependencyService):
         self.attach(q2q.Q2QService(
                 protocolFactoryFactory=IdentityAdminFactory(store).examineRequest,
                 certificateStorage=store,
+                portal=Portal(store, checkers=[store]),
                 q2qPortnum=q2qPortnum,
                 inboundTCPPortnum=inboundTCPPortnum,
                 publicIP=publicIP,

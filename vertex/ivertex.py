@@ -10,14 +10,24 @@ class IQ2QTransport(Interface):
     authenticity of those endpoints.
     """
 
-    def getQ2QHost(self):
+    def getQ2QHost():
         """ Returns a Q2QAddress object representing the user on this end of the
         connection.
         """
 
-    def getQ2QPeer(self):
+    def getQ2QPeer():
         """ Returns a Q2QAddress object representing the user on the other end of the
         connection.
+        """
+
+class IQ2QUser(Interface):
+    """
+    A cred interface for Q2Q users.
+    """
+    def signCertificateRequest(certificateRequest, domainCert, suggestedSerial):
+        """
+        Return a signed certificate object if the subject fields in the
+        certificateRequest are valid.
         """
 
 class IFileTransfer(Interface):

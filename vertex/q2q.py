@@ -17,6 +17,12 @@ from twisted.python import log
 from twisted.python.failure import Failure
 from twisted.application import service
 
+# twisted.cred
+from twisted.cred.checkers import ICredentialsChecker
+from twisted.cred.portal import IRealm, Portal
+from twisted.cred.credentials import IUsernamePassword, UsernamePassword
+from twisted.cred.error import UnauthorizedLogin
+
 # epsilon
 from epsilon.extime import Time
 
@@ -25,7 +31,7 @@ from axiom.slotmachine import _structlike
 
 # vertex
 from vertex import sslverify, juice, subproducer, ptcp
-from vertex import endpoint
+from vertex import endpoint, ivertex
 from vertex.conncache import ConnectionCache
 
 from vertex._unfortunate_defer_hack import DeferredList as FOOCBDeferredList
@@ -1314,25 +1320,36 @@ class Q2Q(juice.Juice, subproducer.SuperProducer):
         Respond to a request to sign a CSR for a user or agent located within
         our domain.
         """
+        if self.service.portal is None:
+            raise BadCertificateRequest("This agent cannot sign certificates.")
+
         subj = certificate_request.getSubject()
 
-        if subj.keys() != ['CN']:
+        sk = subj.keys()
+        if 'CN' not in sk:
             raise BadCertificateRequest(
-                "Certificate requested with bad subject: %s" % (subj.keys(),))
+                "Certificate requested with bad subject: %s" % (sk,))
 
-        username, domain = subj.commonName.split("@")
+        uandd = subj.commonName.split("@")
+        if len(uandd) != 2:
+            raise BadCertificateRequest("Won't sign certificates for other domains")
+        domain = uandd[1]
 
         CS = self.service.certificateStorage
         ourCert = CS.getPrivateCertificate(domain)
 
-        D = self.service.checkPrivateSecret(username, domain, password)
+        D = self.service.portal.login(
+            UsernamePassword(subj.commonName,
+                             password),
+            self,
+            ivertex.IQ2QUser)
 
-        def _(ignored):
-            newCert = ourCert.signRequestObject(certificate_request,
-                                                CS.genSerial(domain))
-            log.msg('signing certificate for user %s@%s: %s' % (
-                    username, domain, newCert.digest()))
-            return dict(certificate=newCert)
+        def _(ial):
+            (iface, aspect, logout) = ial
+            ser = CS.genSerial(domain)
+            return dict(certificate=aspect.signCertificateRequest(
+                    certificate_request, ourCert, ser))
+
         return D.addCallback(_)
 
 
@@ -1845,7 +1862,52 @@ def _nextJuiceLog():
     finally:
         _counter = _counter + 1
 
+class DefaultQ2QAvatar:
+    implements(ivertex.IQ2QUser)
+
+    def __init__(self, username, domain):
+        self.username = username
+        self.domain = domain
+
+    def signCertificateRequest(self, certificateRequest,
+                               domainCert, suggestedSerial):
+        keyz = certificateRequest.getSubject().keys()
+        if keyz != ['CN']:
+            raise BadCertificateRequest(
+                "Don't know how to verify fields other than CN: " +
+                repr(keyz))
+        newCert = domainCert.signRequestObject(
+            certificateRequest,
+            suggestedSerial)
+        log.msg('signing certificate for user %s@%s: %s' % (
+                self.username, self.domain, newCert.digest()))
+        return newCert
+
+
+
 class DefaultCertificateStore:
+
+    implements(ICredentialsChecker, IRealm)
+
+    credentialInterfaces = [IUsernamePassword]
+
+    def requestAvatar(self, avatarId, mind, interface):
+        assert interface is ivertex.IQ2QUser, (
+            "default certificate store only supports one interface")
+        return interface, DefaultQ2QAvatar(*avatarId.split("@")), lambda : None
+
+    def requestAvatarId(self, credentials):
+        username, domain = credentials.username.split("@")
+        pw = self.users.get((domain, username))
+        if pw is None:
+            return defer.fail(UnauthorizedLogin())
+        def _(passwordIsCorrect):
+            if passwordIsCorrect:
+                return username + '@' + domain
+            else:
+                raise UnauthorizedLogin()
+        return defer.maybeDeferred(
+            credentials.checkPassword, pw).addCallback(_)
 
     def __init__(self):
         self.remoteStore = {}
@@ -2127,12 +2189,14 @@ class Q2QService(service.MultiService, protocol.ServerFactory):
             iter(self.subConnections),
             (self.dispatcher or ()) and self.dispatcher.iterconnections())
 
-    def __init__(self, protocolFactoryFactory=None,
+    def __init__(self,
+                 protocolFactoryFactory=None,
                  certificateStorage=None, wrapper=None,
                  q2qPortnum=port,
                  inboundTCPPortnum=None,
                  publicIP=None,
-                 udpEnabled=None):
+                 udpEnabled=None,
+                 portal=None):
         """
 
         @param protocolFactoryFactory: A callable of three arguments
@@ -2152,6 +2216,8 @@ class Q2QService(service.MultiService, protocol.ServerFactory):
         self.protocolFactoryFactory = protocolFactoryFactory
         if certificateStorage is None:
             certificateStorage = DefaultCertificateStore()
+            if portal is None:
+                portal = Portal(certificateStorage, checkers=[certificateStorage])
         self.certificateStorage = certificateStorage
 
         # allow protocols to wrap message handlers in transactions.
@@ -2173,6 +2239,10 @@ class Q2QService(service.MultiService, protocol.ServerFactory):
         # map of {(fromAddress, protocolName): [(factory, description)]}
         self.localFactoriesMapping = {}
 
+        # currently only used for password-lookup for SIGN, but should be
+        # invoked for everything related to connection setup.
+        self.portal = portal
+
         if publicIP is not None:
             self.publicIP = publicIP
 
@@ -2182,10 +2252,6 @@ class Q2QService(service.MultiService, protocol.ServerFactory):
         service.MultiService.__init__(self)
 
     inboundListener = None
-
-    def checkPrivateSecret(self, username, domain, privateSecret):
-        #XXX Should really live way off in cred-land
-        return self.certificateStorage.checkUser(domain, username, privateSecret)
 
     _publicUDPPort = None
 
