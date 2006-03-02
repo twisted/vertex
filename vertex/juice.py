@@ -3,7 +3,7 @@
 
 __metaclass__ = type
 
-import warnings
+import warnings, pprint
 
 from vertex.liner import LineReceiver
 
@@ -11,7 +11,7 @@ from twisted.internet.main import CONNECTION_LOST
 from twisted.internet.defer import Deferred, maybeDeferred, fail
 from twisted.internet.protocol import ServerFactory, ClientFactory
 from twisted.python.failure import Failure
-from twisted.python import log
+from twisted.python import log, filepath
 
 from epsilon import extime
 
@@ -26,7 +26,7 @@ ERROR_DESCRIPTION = '_error_description'
 LENGTH = '_length'
 BODY = 'body'
 
-
+debug = False
 
 class JuiceBox(dict):
     """ I am a packet in the JUICE protocol.  """
@@ -95,6 +95,10 @@ class JuiceBox(dict):
 Box = JuiceBox
 
 class TLSBox(JuiceBox):
+    def __repr__(self):
+        return 'TLS(**%s)' % (super(TLSBox, self).__repr__(),)
+
+
     def __init__(self, __certificate, __verify=None, __sslstarted=None, **kw):
         super(TLSBox, self).__init__(**kw)
         self.certificate = __certificate
@@ -111,11 +115,19 @@ class TLSBox(JuiceBox):
             self.sslstarted()
 
 class QuitBox(JuiceBox):
+    def __repr__(self):
+        return 'Quit(**%s)' % (super(QuitBox, self).__repr__(),)
+
+
     def sendTo(self, proto):
         super(QuitBox, self).sendTo(proto)
         proto.transport.loseConnection()
 
 class _SwitchBox(JuiceBox):
+    def __repr__(self):
+        return 'Switch(**%s)' % (super(_SwitchBox, self).__repr__(),)
+
+
     def __init__(self, __proto, **kw):
         super(_SwitchBox, self).__init__(**kw)
         self.innerProto = __proto
@@ -124,10 +136,18 @@ class _SwitchBox(JuiceBox):
         super(_SwitchBox, self).sendTo(proto)
         proto._switchTo(self.innerProto)
 
+
+
 class NegotiateBox(JuiceBox):
+    def __repr__(self):
+        return 'Negotiate(**%s)' % (super(NegotiateBox, self).__repr__(),)
+
+
     def sendTo(self, proto):
         super(NegotiateBox, self).sendTo(proto)
         proto._setProtocolVersion(int(self['version']))
+
+
 
 class JuiceError(Exception):
     pass
@@ -189,7 +209,7 @@ class DispatchMixin:
             # to invoke the command you are trying to invoke.  some objects
             # have commands exposed in a separate namespace for security
             # reasons, since the security model is a role : namespace mapping.
-            print 'WRONG NAMESPACE', repr(namespace), repr(command.namespaces)
+            log.msg('WRONG NAMESPACE: %r, %r' % (namespace, command.namespaces))
             return None
         def doit(box):
             kw = stringsToObjects(box, command.arguments, proto)
@@ -313,6 +333,9 @@ class JuiceParserBase(DispatchMixin):
             value.errback(reason)
 
     def juiceBoxReceived(self, box):
+        if debug:
+            log.msg("Juice receive: %s" % pprint.pformat(dict(box.iteritems())))
+
         if ANSWER in box:
             question = self._outstandingRequests.pop(box[ANSWER])
             question.addErrback(self._puke)
@@ -501,6 +524,14 @@ class Unicode(String):
         # assert isinstance(inString, str)
         return String.fromString(self, inString).decode('utf-8')
 
+class Path(Unicode):
+    def fromString(self, inString):
+        return filepath.FilePath(Unicode.fromString(self, inString))
+
+    def toString(self, inObject):
+        return Unicode.toString(self, inObject.path)
+
+
 class Float(Argument):
     fromString = float
     toString = str
@@ -544,6 +575,7 @@ class HostDomain(ExtraArg):
 class HostUser(ExtraArg):
     def fromTransport(self, inTransport):
         return inTransport.getQ2QHost().resource
+
 
 
 class Boolean(Argument):
@@ -699,7 +731,7 @@ class Juice(LineReceiver, JuiceParserBase):
     RFC2822-inspired headers, plus a body.  Note that this is NOT a literal
     interpretation of any existing RFC, 822, 2822 or otherwise, but a simpler
     version that does not do line continuations, does not specify any
-    particular format for header values, dispatches semeantic meanings of most
+    particular format for header values, dispatches semantic meanings of most
     headers on the -Command header rather than giving them global meaning, and
     allows multiple sets of headers (messages, or JuiceBoxes) on a connection.
 
@@ -782,6 +814,9 @@ class Juice(LineReceiver, JuiceParserBase):
         if self._startingTLSBuffer is not None:
             self._startingTLSBuffer.append(completeBox)
         else:
+            if debug:
+                log.msg("Juice send: %s" % pprint.pformat(dict(completeBox.iteritems())))
+
             self.transport.write(completeBox.serialize())
 
     def sendCommand(self, command, __content='', __answer=True, **kw):
