@@ -1110,9 +1110,16 @@ class Q2Q(juice.Juice, subproducer.SuperProducer):
         """
         # Verify stuff!
 
-        # print 'handling an inbound', From, to, udp_source
-
         self.verifyCertificateAllowed(to, From)
+        return self.service.verifyHook(From, to, protocol
+                                       ).addCallback(self._inboundimpl,
+                                                     From,
+                                                     to,
+                                                     protocol,
+                                                     udp_source).addErrback(
+            lambda f: f.trap(KeyError) and dict(listeners=[]))
+
+    def _inboundimpl(self, ign, From, to, protocol, udp_source):
 
         # 2-tuples of factory, description
         srvfacts = self.service.getLocalFactories(From, to, protocol)
@@ -2196,7 +2203,8 @@ class Q2QService(service.MultiService, protocol.ServerFactory):
                  inboundTCPPortnum=None,
                  publicIP=None,
                  udpEnabled=None,
-                 portal=None):
+                 portal=None,
+                 verifyHook=None):
         """
 
         @param protocolFactoryFactory: A callable of three arguments
@@ -2246,6 +2254,9 @@ class Q2QService(service.MultiService, protocol.ServerFactory):
         if publicIP is not None:
             self.publicIP = publicIP
 
+        if verifyHook is not None:
+            self.verifyHook = verifyHook
+
         self.appConnectionCache = ConnectionCache()
         self.secureConnectionCache = ConnectionCache()
 
@@ -2254,6 +2265,9 @@ class Q2QService(service.MultiService, protocol.ServerFactory):
     inboundListener = None
 
     _publicUDPPort = None
+
+    def verifyHook(self, From, to, protocol):
+        return defer.succeed(1)
 
     def _retrievePublicUDPPortNumber(self, registrationServerAddress):
         # Create a PTCP port, bounce some traffic off the indicated server,

@@ -104,9 +104,66 @@ class IdentificationDialog:
                 widget.set_sensitive(True)
         D.addCallbacks(itWorked, itDidntWork)
 
+class AddContactDialog:
+    def __init__(self, notification):
+        self.xml = gtk.glade.XML(GLADE_FILE, "add_contact_dialog")
+        self.xml.signal_autoconnect(_SignalAttacher(self))
+        self.window = self.xml.get_widget("add_contact_dialog")
+        self.window.show_all()
+        self.notification = notification
+
+    def doAddContact(self, evt):
+        name = self.xml.get_widget("nameentry").get_text()
+        addr = self.xml.get_widget("q2qidentry").get_text()
+
+    def popdownDialog(self, evt):
+        self.window.destroy()
+
+class AcceptConnectionDialog:
+    def __init__(self, d, From, to, protocol):
+        self.d = d
+        self.xml = gtk.glade.XML(GLADE_FILE, "accept_connection_dialog")
+        self.xml.signal_autoconnect(_SignalAttacher(self))
+        self.label = self.xml.get_widget("accept_connection_label")
+        self.label.set_text(
+            "Accept connection from %s for %s?" % (From, protocol))
+        self.window = self.xml.get_widget("accept_connection_dialog")
+        self.window.show_all()
+
+    done = False
+
+    def destroyit(self, evt):
+        self.window.destroy()
+
+    def acceptConnectionEvt(self, evt):
+        self.done = True
+        print "YES"
+        self.d.callback(1)
+        print "WHAT"
+        self.window.destroy()
+
+    def rejectConnectionEvt(self, evt):
+        print "DSTRY"
+        if not self.done:
+            print "DIE!"
+            from twisted.python import failure
+            self.d.errback(failure.Failure(KeyError("Connection rejected by user")))
+        else:
+            print "OK"
+
 from twisted.internet.protocol import ServerFactory
+from twisted.internet.protocol import Protocol
+
+class VertexDemoProtocol(Protocol):
+
+    def connectionMade(self):
+        print 'CONN MADE'
+
+    def dataReceived(self, data):
+        print 'HOLY SHNIKIES', data
 
 class VertexFactory(ServerFactory):
+    protocol = VertexDemoProtocol
 
     def __init__(self, notification):
         self.notification = notification
@@ -145,10 +202,20 @@ class NotificationEntry:
             self.xml.get_widget("contacts_begin"))
 
         eventbox.connect('button_press_event', self.popupMenu)
-        self.clientService = ClientQ2QService(os.path.expanduser(
-                "~/.vertex/q2q-certificates"))
-
+        self.clientService = ClientQ2QService(
+            os.path.expanduser(
+                "~/.vertex/q2q-certificates"),
+            verifyHook=self.displayVerifyDialog,
+            inboundTCPPortnum=8172,
+            # q2qPortnum=8173,
+            udpEnabled=False)
         self.setCurrentID(self.clientService.getDefaultFrom())
+
+    def displayVerifyDialog(self, From, to, protocol):
+        from twisted.internet import defer
+        d = defer.Deferred()
+        AcceptConnectionDialog(d, From, to, protocol)
+        return d
 
     def setCurrentID(self, idName):
 
@@ -163,10 +230,18 @@ class NotificationEntry:
             def notLoggedIn(error):
                 SL("Identify")
                 self.animator.stop(0)
+            # This following order is INSANE - you should definitely not have
+            # to wait until the LISTEN succeeds to start the service; quite the
+            # opposite, you should wait until the service has started, then
+            # issue the LISTEN!! For some reason, the connection drops
+            # immediately if you do that, and I have no idea why.  As soon as I
+            # can fix that issue the startService should be moved up previous
+            # to listenQ2Q.
             self.clientService.listenQ2Q(currentID,
                                          {'vertex': VertexFactory(self)},
                                          "desktop vertex UI").addCallbacks(
-                loggedIn, notLoggedIn)
+                loggedIn, notLoggedIn).addCallback(
+                lambda ign: self.clientService.startService())
 
     # XXX event handlers
 
@@ -183,7 +258,13 @@ class NotificationEntry:
         IdentificationDialog(self.clientService, self)
 
     def addContact(self, event):
-        mi = gtk.MenuItem("Dummy Contact")
+        AddContactDialog(self)
+
+    def _addContactMenuItem(self, contactName, q2qid):
+        mi = gtk.MenuItem(contactName)
+        def initiateFileTransfer(evt):
+            print 'Trying to talk to ', q2qid
+        mi.signal_connect("activate", initiateFileTransfer)
         mi.show_all()
         self.menu.insert(mi, self.contactsStart + 1)
 
@@ -199,4 +280,7 @@ def main():
     gnome.program_init("Vertex", "0.1")
     global ne
     ne = NotificationEntry()
+    from twisted.python import log
+    import sys
+    log.startLogging(sys.stdout)
     reactor.run()

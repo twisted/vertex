@@ -1,0 +1,7 @@
+#!/usr/bin/python
+# Copyright 2005 Divmod, Inc.  See LICENSE file for details
+
+from vertex.gtk2hack import main
+
+if __name__ == '__main__':
+    main()
