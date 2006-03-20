@@ -299,7 +299,7 @@ def parseJuiceHeaders(lines):
             continue
         parts = L.split(': ', 1)
         if len(parts) != 2:
-            raise MalformedJuiceBox(L)
+            raise MalformedJuiceBox("Wrong number of parts: %r" % (L,))
         key, value = parts
         key = normalizeKey(key)
         b[key] = value
