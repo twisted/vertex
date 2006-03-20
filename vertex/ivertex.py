@@ -1,6 +1,5 @@
 # Copyright 2005 Divmod, Inc.  See LICENSE file for details
 
-from formless.annotate import Typed, InputError
 from zope.interface import Interface
 
 class IQ2QTransport(Interface):
@@ -88,14 +87,6 @@ class ICertificateStorage(Interface):
     def addPrivateCertificate(self, domainName, existingCertificate=None):
         """
         """
-
-class Address(Typed):
-    def coerce(self, val, configurable):
-        try:
-            username, domain = val.split("@")
-        except ValueError:
-            raise InputError("Please enter an address of the form name@domain")
-        return username, domain
 
 class IOfferUp(Interface):
     """
