@@ -1,8 +1,8 @@
 # -*- test-case-name: vertex.test.test_ptcp -*-
 
-import itertools, random, os
+import random, os
 
-from twisted.internet import reactor, protocol, defer, task, error
+from twisted.internet import reactor, protocol, defer, error
 from twisted.trial import unittest
 
 from vertex import ptcp

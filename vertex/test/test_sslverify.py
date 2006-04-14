@@ -6,7 +6,7 @@ from OpenSSL import SSL
 from OpenSSL.crypto import PKey, X509, X509Req
 from OpenSSL.crypto import TYPE_RSA
 
-from twisted.trial import unittest, util
+from twisted.trial import unittest
 from twisted.internet import protocol, defer, reactor
 from twisted.python import log
 

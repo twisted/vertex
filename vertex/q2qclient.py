@@ -1,6 +1,5 @@
 # Copyright 2005 Divmod, Inc.  See LICENSE file for details
 
-import time
 import os
 import sys
 import struct
