@@ -4,6 +4,8 @@
 
 from cStringIO import StringIO
 
+from twisted.internet import error
+
 from vertex.test import utils
 
 
@@ -78,14 +80,14 @@ class IOPump:
                 print '* C'
             self.server.transport.disconnected = True
             self.client.transport.disconnecting = True
-            self.client.connectionLost(None)
+            self.client.connectionLost(error.ConnectionDone("Connection done"))
             return True
         if self.client.transport.disconnecting and not self.client.transport.disconnected:
             if self.debug or debug:
                 print '* S'
             self.client.transport.disconnected = True
             self.server.transport.disconnecting = True
-            self.server.connectionLost(None)
+            self.server.connectionLost(error.ConnectionDone("Connection done"))
             return True
         return False
 
