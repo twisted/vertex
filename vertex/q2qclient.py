@@ -5,9 +5,7 @@ import sys
 import struct
 import getpass
 
-from epsilon import juice
-
-from vertex import q2q, sigma
+from vertex import q2q, juice, sigma
 from twisted.python.usage import Options
 
 from twisted.python import log

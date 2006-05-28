@@ -9,11 +9,10 @@ from twisted.python.filepath import FilePath
 
 from twisted.trial import unittest
 
-from epsilon.test.iosim import IOPump
-
 from vertex.q2q import Q2QAddress
 from vertex import sigma
 
+from vertex.test.iosim import IOPump
 from vertex.test.mock_data import data as TEST_DATA
 
 class FakeQ2QTransport(FileWrapper):

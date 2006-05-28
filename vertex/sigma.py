@@ -15,8 +15,7 @@ from twisted.internet import protocol
 
 from twisted.python.filepath import FilePath
 
-from epsilon import juice
-
+from vertex import juice
 from vertex import q2q
 from vertex import bits
 from vertex import conncache

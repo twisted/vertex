@@ -15,9 +15,7 @@ from twisted.internet.error import ConnectionDone
 from zope.interface import implements
 from twisted.internet.interfaces import IResolverSimple
 
-from epsilon import sslverify, juice
-
-from vertex import q2q
+from vertex import q2q, sslverify, juice
 def noResources(*a):
     return []
 

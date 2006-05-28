@@ -25,14 +25,12 @@ from twisted.cred.error import UnauthorizedLogin
 
 # epsilon
 from epsilon.extime import Time
-from epsilon import sslverify
-from epsilon import juice
 
 # axiom
 from axiom.slotmachine import _structlike
 
 # vertex
-from vertex import subproducer, ptcp
+from vertex import sslverify, juice, subproducer, ptcp
 from vertex import endpoint, ivertex
 from vertex.conncache import ConnectionCache
 
