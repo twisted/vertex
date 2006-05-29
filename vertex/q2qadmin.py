@@ -1,6 +1,6 @@
 # Copyright 2005 Divmod, Inc.  See LICENSE file for details
 
-from vertex import juice
+from epsilon import juice
 
 class NotAllowed(Exception):
     pass

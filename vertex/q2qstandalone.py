@@ -4,7 +4,9 @@ import os
 
 from twisted.cred.portal import Portal
 
-from vertex import juice, q2q
+from epsilon import juice
+
+from vertex import q2q
 from vertex.depserv import DependencyService, Conf
 from vertex.q2qadmin import AddUser, NotAllowed
 
