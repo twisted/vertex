@@ -1,52 +1,14 @@
 
 import os
+import rfc822
 
-import pygtk
-pygtk.require("2.0")
-from twisted.internet import gtk2reactor
-gtk2reactor.install()
+from twisted.python.filepath import FilePath
 
-from twisted.internet import reactor
-from twisted.internet.task import LoopingCall
-
-import gtk
+# import gtk ### pyflakes complains about this, due to the next line
 import gtk.glade
-import egg.trayicon
 
 from vertex.q2qclient import ClientQ2QService
 from vertex.q2q import Q2QAddress
-
-class IconAnimator:
-    lc = None
-    def __init__(self, box, icons):
-        self.box = box
-        self.icons = icons
-        for icon in icons:
-            icon.show()
-        self.stop()
-
-    def tick(self):
-        self.position += 1
-        self.position %= len(self.icons)
-        c = self.box.get_children()
-        if c:
-            self.box.remove(c[0])
-        self.box.add(self.icons[self.position])
-
-    def start(self):
-        self.animating = True
-        self.tick()
-        self.lc = LoopingCall(self.tick)
-        self.lc.start(1.0)
-
-    def stop(self, index=0):
-        self.animating = False
-        self.position = index - 1
-        self.tick()
-        if self.lc is not None:
-            self.lc.stop()
-            self.lc = None
-
 
 class _NullCb:
     def __init__(self, name):
@@ -64,9 +26,8 @@ class _SignalAttacher:
 
 GLADE_FILE = os.path.splitext(__file__)[0] + '.glade'
 
-
 class IdentificationDialog:
-    def __init__(self, clientService, notification):
+    def __init__(self, clientService, plug):
         self.xml = gtk.glade.XML(GLADE_FILE, "ident_dialog")
         self.clientService = clientService
         self.xml.signal_autoconnect(_SignalAttacher(self))
@@ -77,7 +38,7 @@ class IdentificationDialog:
         self.identifyWindow = self.xml.get_widget("ident_dialog")
         self.cancelButton = self.xml.get_widget('cancelbutton1')
         self.okButton = self.xml.get_widget('okbutton1')
-        self.notification = notification
+        self.plug = plug
 
     def identifyCancel(self, event):
         self.identifyWindow.destroy()
@@ -97,7 +58,7 @@ class IdentificationDialog:
         self.progressLabel.set_text("Authenticating...")
         def itWorked(workedNone):
             self.identifyWindow.destroy()
-            self.notification.setCurrentID(idstr)
+            self.plug.setCurrentID(idstr)
         def itDidntWork(error):
             self.progressLabel.set_text(error.getErrorMessage())
             for widget in sensitiveWidgets:
@@ -105,18 +66,20 @@ class IdentificationDialog:
         D.addCallbacks(itWorked, itDidntWork)
 
 class AddContactDialog:
-    def __init__(self, notification):
+    def __init__(self, plug):
         self.xml = gtk.glade.XML(GLADE_FILE, "add_contact_dialog")
         self.xml.signal_autoconnect(_SignalAttacher(self))
         self.window = self.xml.get_widget("add_contact_dialog")
         self.window.show_all()
-        self.notification = notification
+        self.plug = plug
 
     def doAddContact(self, evt):
         name = self.xml.get_widget("nameentry").get_text()
         addr = self.xml.get_widget("q2qidentry").get_text()
+        self.plug.addBuddy(name, addr)
+        self.popdownDialog()
 
-    def popdownDialog(self, evt):
+    def popdownDialog(self, evt=None):
         self.window.destroy()
 
 class AcceptConnectionDialog:
@@ -165,51 +128,98 @@ class VertexDemoProtocol(Protocol):
 class VertexFactory(ServerFactory):
     protocol = VertexDemoProtocol
 
-    def __init__(self, notification):
-        self.notification = notification
+    def __init__(self, plug):
+        self.plug = plug
 
     def startFactory(self):
-        self.notification.animator.stop(1)
+        #self.plug.animator.stop(1)
+        pass
 
     def stopFactory(self):
-        self.notification.animator.stop(0)
+        #self.plug.animator.stop(0)
+        pass
 
 
+class BuddyItem:
+    def __init__(self, plug, alias, q2qaddress):
+        mi = self.menuItem = gtk.MenuItem(alias + " <"+q2qaddress+">")
+        mi.connect("activate", self.initiateFileTransfer)
+        mi.show_all()
+        self.plug = plug
+        self.alias = alias
+        self.q2qaddress = q2qaddress
+        self.plug.loadedBuddies[q2qaddress] = self
 
-class NotificationEntry:
+    def initiateFileTransfer(self, evt):
+        print 'Initiate transfer with ' + self.alias + self.q2qaddress
+
+    def addToMenu(self):
+        self.plug.section.append(self.menuItem)
+
+    def removeFromMenu(self):
+        self.plug.section.remove(self.menuItem)
+
+from twisted.plugin import IPlugin
+from prime.iprime import IMenuApplication
+from zope.interface import implements
+
+class PlugEntry:
+    implements(IMenuApplication, IPlugin)
+
     def __init__(self):
         self.xml = gtk.glade.XML(GLADE_FILE, "notification_popup")
-        icon = egg.trayicon.TrayIcon("Vertex")
-        eventbox = gtk.EventBox()
-        icon.add(eventbox)
-        icon.show_all()
 
-        self.animateItem = self.xml.get_widget("animate")
+    def register(self, section):
+        print 'REGISTER'
+        self.section = section
 
-#         [gtk.image_new_from_icon_name(name, gtk.ICON_SIZE_SMALL_TOOLBAR)
-#          for name in ['gnome-mime-text-x-python', 'xchat']]
-
-        icons = [
-            gtk.image_new_from_stock(name, gtk.ICON_SIZE_SMALL_TOOLBAR)
-            for name in gtk.STOCK_NO, gtk.STOCK_YES
-            ]
-
-        self.animator = IconAnimator(eventbox, icons)
-        self.xml.signal_autoconnect(_SignalAttacher(self))
-        self.menu = self.xml.get_widget("notification_popup")
-
-        self.contactsStart = self.menu.get_children().index(
-            self.xml.get_widget("contacts_begin"))
-
-        eventbox.connect('button_press_event', self.popupMenu)
+        workingdir = FilePath(os.path.expanduser("~/.vertex"))
         self.clientService = ClientQ2QService(
-            os.path.expanduser(
-                "~/.vertex/q2q-certificates"),
+            workingdir.child("q2q-certificates").path,
             verifyHook=self.displayVerifyDialog,
             inboundTCPPortnum=8172,
             # q2qPortnum=8173,
             udpEnabled=False)
         self.setCurrentID(self.clientService.getDefaultFrom())
+        self.buddiesfile = workingdir.child("q2q-buddies.txt")
+        self.loadedBuddies = {}
+        self.parseBuddies()
+
+    def parseBuddies(self):
+        try:
+            self.buddyList = rfc822.AddressList(self.buddiesfile.open().read())
+        except IOError:
+            return
+        self.clearContactMenu()
+        for dispn, addr in self.buddyList:
+            if addr not in self.loadedBuddies:
+                BuddyItem(self, dispn, addr)
+        self.buildContactMenu()
+
+    def clearContactMenu(self):
+        for bud in self.loadedBuddies.values():
+            bud.removeFromMenu()
+
+    def buildContactMenu(self):
+        l = self.loadedBuddies.values()
+        l.sort(key=lambda x: x.alias)
+        l.reverse()
+        for bud in l:
+            bud.addToMenu()
+
+    def addBuddy(self, alias, q2qaddr):
+        temp = self.buddiesfile.temporarySibling()
+        try:
+            origdata = self.buddiesfile.open().read()
+        except IOError:
+            origdata = ''
+        moredata = '\n%s <%s>' % (alias, q2qaddr)
+        ftemp = temp.open('w')
+        ftemp.write(origdata)
+        ftemp.write(moredata)
+        ftemp.close()
+        temp.moveTo(self.buddiesfile)
+        self.parseBuddies()
 
     def displayVerifyDialog(self, From, to, protocol):
         from twisted.internet import defer
@@ -222,14 +232,14 @@ class NotificationEntry:
         if idName is not None:
             currentID = Q2QAddress.fromString(idName)
             # log in?
-            self.animator.start()
+            # self.animator.start()
             SL = self.xml.get_widget("identifymenuitem").get_children()[0].set_label
             def loggedIn(result):
                 SL(str(currentID))
                 self.currentID = currentID
             def notLoggedIn(error):
                 SL("Identify")
-                self.animator.stop(0)
+                # self.animator.stop(0)
             # This following order is INSANE - you should definitely not have
             # to wait until the LISTEN succeeds to start the service; quite the
             # opposite, you should wait until the service has started, then
@@ -246,12 +256,11 @@ class NotificationEntry:
     # XXX event handlers
 
     def toggleAnimate(self, event):
-        SL = self.animateItem.get_children()[0].set_label
         if self.animator.animating:
-            SL("Animate")
+            # SL("Animate")
             self.animator.stop()
         else:
-            SL("Stop Animating")
+            # SL("Stop Animating")
             self.animator.start()
 
     def identifyDialog(self, event):
@@ -259,28 +268,3 @@ class NotificationEntry:
 
     def addContact(self, event):
         AddContactDialog(self)
-
-    def _addContactMenuItem(self, contactName, q2qid):
-        mi = gtk.MenuItem(contactName)
-        def initiateFileTransfer(evt):
-            print 'Trying to talk to ', q2qid
-        mi.signal_connect("activate", initiateFileTransfer)
-        mi.show_all()
-        self.menu.insert(mi, self.contactsStart + 1)
-
-    def popupMenu(self, box, event):
-        self.menu.popup(None, None, None, event.button, event.get_time())
-
-    def quit(self, event):
-        reactor.stop()
-
-
-def main():
-    import gnome
-    gnome.program_init("Vertex", "0.1")
-    global ne
-    ne = NotificationEntry()
-    from twisted.python import log
-    import sys
-    log.startLogging(sys.stdout)
-    reactor.run()
