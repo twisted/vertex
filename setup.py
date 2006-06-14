@@ -1,23 +1,24 @@
+from epsilon import setuphelper
 
-from distutils.core import setup
+from vertex import version
 
-setup(
+setuphelper.autosetup(
     name="Vertex",
-    version="0.1",
+    version=version.short(),
     maintainer="Divmod, Inc.",
     maintainer_email="support@divmod.org",
     url="http://divmod.org/trac/wiki/DivmodVertex",
     license="MIT",
     platforms=["any"],
-    description="A Q2Q protocol implementation",
+    description=
+        """
+        Divmod Vertex is the first implementation of the Q2Q protocol, which
+        is a peer-to-peer communication protocol for establishing
+        stream-based communication between named endpoints.
+        """,
     classifiers=[
         "Intended Audience :: Developers",
         "Programming Language :: Python",
         "Development Status :: 2 - Pre-Alpha",
         "Topic :: Internet"],
-
-    packages=['vertex',
-              'vertex.scripts',
-              'vertex.test'],
-
-    scripts=['bin/vertex', 'bin/certcreate'])
+    )

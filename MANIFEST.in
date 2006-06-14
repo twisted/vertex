@@ -1,3 +1,4 @@
+include LICENSE
 include NAME.txt
 include DEPS.txt
 include doc/q2q-standalone.tac

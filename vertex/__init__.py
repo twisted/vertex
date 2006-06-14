@@ -1,5 +1,4 @@
 # -*- test-case-name: vertex.test -*-
 
-from epsilon.versions import Version
+from vertex._version import version
 
-version = Version(__name__, 0, 1, 0)

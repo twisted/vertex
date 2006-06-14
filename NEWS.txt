@@ -1,0 +1,15 @@
+0.2.0 (2006-06-12):
+
+  - Moved JUICE implementation into Epsilon.
+  - Removed dependency on Nevow's formless.
+  - Clarify licensing terms.
+  - Fix bugs on 64-bit platforms.
+  - removed buggy legacy non-TLS options which would break negotiation with
+    OpenSSL 0.9.8a.
+  - Deprecated twisted test APIs removed.
+  - First phase of integration with twisted.cred; vertex endpoints can now be
+    authenticated against a Twisted UsernamePassword cred authenticator.
+
+0.1.0 (2005-10-10):
+
+  - Initial release.

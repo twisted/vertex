@@ -1,5 +1,5 @@
 Python 2.4
-Twisted 2.1.1
+Twisted 2.4.0
 PyOpenSSL 0.6
 OpenSSL 0.9.7
-Epsilon 0.1
+Epsilon 0.5.0
