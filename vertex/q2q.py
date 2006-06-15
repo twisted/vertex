@@ -27,9 +27,7 @@ from twisted.cred.error import UnauthorizedLogin
 from epsilon.extime import Time
 from epsilon import sslverify
 from epsilon import juice
-
-# axiom
-from axiom.slotmachine import _structlike
+from epsilon.structlike import record
 
 # vertex
 from vertex import subproducer, ptcp
@@ -2060,12 +2058,7 @@ class _MessageChannel(object):
             self.toAddress,
             self.namespace, command)
 
-class _ConnectionWaiter(_structlike):
-    __names__ = ['From',
-                 'to',
-                 'protocolName',
-                 'protocolFactory',
-                 'isClient']
+_ConnectionWaiter = record('From to protocolName protocolFactory isClient')
 
 class Q2QClientFactory(protocol.ClientFactory):
 
