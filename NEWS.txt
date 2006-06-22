@@ -1,5 +1,4 @@
 0.2.0 (2006-06-12):
-
   - Moved JUICE implementation into Epsilon.
   - Removed dependency on Nevow's formless.
   - Clarify licensing terms.
