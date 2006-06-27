@@ -8,7 +8,7 @@ import getpass
 from epsilon import juice
 
 from vertex import q2q, sigma
-from twisted.python.usage import Options
+from twisted.python.usage import Options, UsageError
 
 from twisted.python import log
 from twisted.internet import reactor
@@ -386,6 +386,10 @@ class Q2QClientProgram(Options):
     optFlags = []
 
     service = None
+
+    def postOptions(self):
+        if not self.subCommand:
+            self.opt_help()
 
     def info(self, message):
         sys.stderr.write(">> %s\n" % (message,))
