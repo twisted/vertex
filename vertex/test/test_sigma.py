@@ -156,7 +156,7 @@ class BasicTransferTest(TestBase):
 
 
     def testOneSenderOneRecipient(self):
-        self.senderNexus.push(self.sfile, 'TEST->TEST', [receiver])
+        self.senderNexus.push(self.sfile, 'TESTtoTEST', [receiver])
         self.service.flush()
         peerThingyoes = childrenOf(self.receiverNexus.ui.basepath)
         self.assertEquals(len(peerThingyoes), 1)
@@ -180,7 +180,7 @@ class BasicTransferTest(TestBase):
 
         self.stoppers.extend(nexi)
 
-        self.senderNexus.push(self.sfile, 'TEST->TEST', raddresses)
+        self.senderNexus.push(self.sfile, 'TESTtoTEST', raddresses)
         self.service.flush()
 
         receivedIntroductions = 0
