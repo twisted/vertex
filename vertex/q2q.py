@@ -898,12 +898,15 @@ class Q2Q(juice.Juice, subproducer.SuperProducer):
             if listener.transport.getPeer().host == srchost:
                 # print 'bound in clients loop'
 
-                bindery.append(
-                    BindUDP(q2qsrc=q2qsrc,
+                d = BindUDP(q2qsrc=q2qsrc,
                             q2qdst=q2qdst,
                             udpsrc=udpsrc,
                             udpdst=udpdst,
-                            protocol=protocol).do(listener))
+                            protocol=protocol).do(listener)
+                def swallowKnown(err):
+                    err.trap(error.ConnectionDone, error.ConnectionLost)
+                d.addErrback(swallowKnown)
+                bindery.append(d)
         if bindery:
             # print 'bindery return', len(bindery)
             def _justADict(ign):
@@ -1318,7 +1321,6 @@ class Q2Q(juice.Juice, subproducer.SuperProducer):
             S:
 
         """
-        from twisted.internet.main import CONNECTION_DONE
         self.connections[int(box['id'])].connectionLost(CONNECTION_DONE)
         return juice.Box()
 
@@ -1728,9 +1730,9 @@ class Q2QBootstrap(juice.Juice):
 
     def connectionMade(self):
         if self.connIdentifier is not None:
-            def trapKeyError(err):
-                err.trap(KeyError)
-            self.retrieveConnection(self.connIdentifier, self.protoFactory).addErrback(trapKeyError)
+            def swallowKnown(err):
+                err.trap(error.ConnectionDone, KeyError)
+            self.retrieveConnection(self.connIdentifier, self.protoFactory).addErrback(swallowKnown)
 
     def whoami(self):
         """Return a Deferred which fires with a 2-tuple of (dotted quad ip, port

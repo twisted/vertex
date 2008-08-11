@@ -229,7 +229,13 @@ class Erroneous(juice.Juice):
     command_BREAK.command = Break
 
     def command_ENGENDER_ERROR(self):
-        return Break().do(self)
+        def ebBroken(err):
+            err.trap(ConnectionDone)
+            # This connection is dead.  Avoid having an error logged by turning
+            # this into success; the result can't possibly get to the other
+            # side, anyway. -exarkun
+            return {}
+        return Break().do(self).addErrback(ebBroken)
     command_ENGENDER_ERROR.command = EngenderError
 
     def command_FLAG(self):
@@ -299,7 +305,6 @@ class Q2QConnectionTestCase(unittest.TestCase):
 
 
     def setUp(self):
-        log.ignoreErrors(ConnectionDone)
         self.fromAddress = q2q.Q2QAddress(self.fromDomain, self.fromResource)
         self.toAddress = q2q.Q2QAddress(self.toDomain, self.toResource)
 
@@ -350,7 +355,8 @@ class Q2QConnectionTestCase(unittest.TestCase):
         reactor.installResolver(self._oldResolver)
         del reactor.connectTCP
         return self.msvc.stopService()
-        # log.clearIgnores()
+
+
 
 class ConnectionTestMixin:
 
@@ -439,12 +445,11 @@ class ConnectionTestMixin:
                                         server['certificate'])
                                     yield server
 
-                        ponged = defer.Deferred()
                         _4 = self.clientClientService.connectQ2Q(
                             self.fromAddress,
                             self.toAddress,
                             'pony',
-                            OneTrickPonyClientFactory(ponged),
+                            juice.JuiceClientFactory(),
                             chooser=chooser)
                         def _4c(ign):
                             self.failUnlessEqual(expectedList, [])
@@ -576,11 +581,13 @@ class ConnectionTestMixin:
             ErroneousClientFactory())
         def connected(proto):
             return EngenderError().do(proto)
-        def exploded(err):
-            err.trap(ConnectionDone)
         d.addCallback(connected)
-        d.addCallbacks(self.successIsFailure, exploded)
-        d.addCallback(lambda ign: log.flushErrors(ErroneousClientError))
+        d = self.assertFailure(d, ConnectionDone)
+        def cbDisconnected(err):
+            self.assertEqual(
+                len(self.flushLoggedErrors(ErroneousClientError)),
+                1)
+        d.addCallback(cbDisconnected)
         return d
 
     def successIsFailure(self, success):
@@ -596,12 +603,13 @@ class ConnectionTestMixin:
                 what.trap(juice.UnhandledRemoteJuiceError)
             Break().do(proto).addCallbacks(self.successIsFailure, trapit)
             return Flag().do(proto)
-        def err(x):
-            x.trap(ConnectionDone)
-
         d.addCallback(connected)
-        d.addCallbacks(self.successIsFailure, err)
-        d.addCallback(lambda ign: log.flushErrors(ErroneousClientError))
+        d = self.assertFailure(d, ConnectionDone)
+        def cbDisconnected(err):
+            self.assertEqual(
+                len(self.flushLoggedErrors(ErroneousClientError)),
+                1)
+        d.addCallback(cbDisconnected)
         return d
 
 

@@ -901,7 +901,7 @@ class PTCP(protocol.DatagramProtocol):
         try:
             pkt.verifyChecksum()
         except TruncatedDataError:
-            print '(ptcp packet truncated: %r)' % (pkt,)
+#             print '(ptcp packet truncated: %r)' % (pkt,)
             self.sendPacket(
                 PTCPPacket.create(
                     pkt.destPseudoPort,
