@@ -146,13 +146,18 @@ class TestProducerProtocol(protocol.Protocol):
             self.transport.unregisterProducer()
 
 class PTCPTransportTestCase(ConnectedPTCPMixin, unittest.TestCase):
-    def setUpClass(self):
-        ptcp.PTCPConnection._retransmitTimeout /= 10
-        ptcp.PTCPPacket.retransmitCount *= 10
+    def setUp(self):
+        """
+        I have no idea why one of these values is divided by 10 and the
+        other is multiplied by 10.  -exarkun
+        """
+        self.patch(
+            ptcp.PTCPConnection, '_retransmitTimeout',
+            ptcp.PTCPConnection._retransmitTimeout / 10)
+        self.patch(
+            ptcp.PTCPPacket, 'retransmitCount',
+            ptcp.PTCPPacket.retransmitCount * 10)
 
-    def tearDownClass(self):
-        ptcp.PTCPConnection._retransmitTimeout *= 10
-        ptcp.PTCPPacket.retransmitCount /= 10
 
     def xtestWhoAmI(self):
         (serverProto, clientProto,
@@ -314,12 +319,17 @@ class SmallMTUTransportTestCase(PTCPTransportTestCase):
         results[-1].write = insufficientTransmitter(results[-1].write, 128)
         return results
 
-class TimeoutTestCase(ConnectedPTCPMixin, unittest.TestCase):
-    def setUpClass(self):
-        ptcp.PTCPConnection._retransmitTimeout /= 10
 
-    def tearDownClass(self):
-        ptcp.PTCPConnection._retransmitTimeout *= 10
+
+class TimeoutTestCase(ConnectedPTCPMixin, unittest.TestCase):
+    def setUp(self):
+        """
+        Shorten the retransmit timeout so that tests finish more quickly.
+        """
+        self.patch(
+            ptcp.PTCPConnection, '_retransmitTimeout',
+            ptcp.PTCPConnection._retransmitTimeout / 10)
+
 
     def testConnectTimeout(self):
         (serverProto, clientProto,
