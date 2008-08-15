@@ -1,5 +1,9 @@
 # -*- test-case-name: vertex.test.test_q2q -*-
-# Copyright 2005 Divmod, Inc.  See LICENSE file for details
+# Copyright 2005-2008 Divmod, Inc.  See LICENSE file for details
+
+"""
+I{Quotient to Quotient} protocol implementation.
+"""
 
 # stdlib
 import itertools
@@ -13,6 +17,9 @@ from zope.interface import implements
 # twisted
 from twisted.internet import reactor, defer, interfaces, protocol, error
 from twisted.internet.main import CONNECTION_DONE
+from twisted.internet.ssl import (
+    CertificateRequest, Certificate, PrivateCertificate, KeyPair,
+    DistinguishedName)
 from twisted.python import log
 from twisted.python.failure import Failure
 from twisted.application import service
@@ -25,7 +32,6 @@ from twisted.cred.error import UnauthorizedLogin
 
 # epsilon
 from epsilon.extime import Time
-from epsilon import sslverify
 from epsilon import juice
 from epsilon.structlike import record
 
@@ -48,7 +54,10 @@ class AttemptsFailed(ConnectionError):
 class NoAttemptsMade(ConnectionError):
     pass
 
-class BadCertificateRequest(sslverify.VerifyError):
+class VerifyError(Exception):
+    pass
+
+class BadCertificateRequest(VerifyError):
     pass
 
 class IgnoreConnectionFailed(protocol.ClientFactory):
@@ -200,10 +209,10 @@ class _Base64Wrapped(juice.Base64Binary):
         return self.loader.load(juice.Base64Binary.fromString(self, arg))
 
 class CertReq(_Base64Wrapped):
-    loader = sslverify.CertificateRequest
+    loader = CertificateRequest
 
 class Cert(_Base64Wrapped):
-    loader = sslverify.Certificate
+    loader = Certificate
 
 class SimpleStringList(juice.Argument):
     separator = ', '
@@ -752,7 +761,7 @@ class Inbound(juice.Command):
                  ('description', juice.Unicode())]))]
 
     errors = {KeyError: "NotFound"}
-    fatalErrors = {sslverify.VerifyError: "VerifyError"}
+    fatalErrors = {VerifyError: "VerifyError"}
 
 class Outbound(juice.Command):
     """Similar to Inbound, but _requires that the recipient already has the
@@ -1024,7 +1033,7 @@ class Q2Q(juice.Juice, subproducer.SuperProducer):
         our peer is foobar.com they may claim to be operating on behalf of any
         user @foobar.com.
 
-        @raise: L{sslverify.VerifyError} if the certificates do not match the
+        @raise: L{VerifyError} if the certificates do not match the
         claimed addresses.
         """
 
@@ -1049,9 +1058,9 @@ class Q2Q(juice.Juice, subproducer.SuperProducer):
                 # XXX also TODO: make it so that anonymous connections are
                 # disabled by default for most protocols
                 return True
-            raise sslverify.VerifyError("No official negotiation has taken place.")
+            raise VerifyError("No official negotiation has taken place.")
 
-        peerCert = sslverify.Certificate.peerFromTransport(self.transport)
+        peerCert = Certificate.peerFromTransport(self.transport)
         ourCert = self.hostCertificate
 
         ourClaimedDomain = ourAddress.domainAddress()
@@ -1059,7 +1068,7 @@ class Q2Q(juice.Juice, subproducer.SuperProducer):
 
         # Sanity check #1: did we pick the right certificate on our end?
         if not ourClaimedDomain.claimedAsIssuerOf(ourCert):
-            raise sslverify.VerifyError(
+            raise VerifyError(
                 "Something has gone horribly wrong: local domain mismatch "
                 "claim: %s actual: %s" % (ourClaimedDomain,
                                           ourCert.getIssuer()))
@@ -1077,7 +1086,7 @@ class Q2Q(juice.Juice, subproducer.SuperProducer):
             # glyph@divmod.com's certificate).
             return
 
-        raise sslverify.VerifyError(
+        raise VerifyError(
             "Us: %s Them: %s "
             "TheyClaimWeAre: %s TheyClaimTheyAre: %s" %
             (ourCert, peerCert,
@@ -1091,10 +1100,10 @@ class Q2Q(juice.Juice, subproducer.SuperProducer):
         # described by 'From', and talking *to* a server-side representation of
         # the user described by 'From'.
         self.verifyCertificateAllowed(From, From)
-        theirCert = sslverify.Certificate.peerFromTransport(self.transport)
+        theirCert = Certificate.peerFromTransport(self.transport)
         for protocolName in protocols:
             if protocolName.startswith('.'):
-                raise sslverify.VerifyError(
+                raise VerifyError(
                     "Internal protocols are for server-server use _only_: %r" %
                     protocolName)
 
@@ -1236,7 +1245,7 @@ class Q2Q(juice.Juice, subproducer.SuperProducer):
             # make sure that the certificate that we're relaying matches the
             # certificate that they gave us!
             if listenerInfo['methods']:
-                allowedCertificate = sslverify.Certificate.peerFromTransport(
+                allowedCertificate = Certificate.peerFromTransport(
                     listener.transport)
                 listenerInfo['certificate'] = allowedCertificate
                 result.append(listenerInfo)
@@ -1335,7 +1344,7 @@ class Q2Q(juice.Juice, subproducer.SuperProducer):
         subj = certificate_request.getSubject()
 
         sk = subj.keys()
-        if 'CN' not in sk:
+        if 'commonName' not in sk:
             raise BadCertificateRequest(
                 "Certificate requested with bad subject: %s" % (sk,))
 
@@ -1454,11 +1463,11 @@ class Q2Q(juice.Juice, subproducer.SuperProducer):
                 theirIssuer = theirCert.getIssuer().commonName
                 theirName = theirCert.getSubject().commonName
                 if (theirName != str(dhost)):
-                    raise sslverify.VerifyError(
+                    raise VerifyError(
                         "%r claimed it was %r in IDENTIFY response"
                         % (theirName, dhost))
                 if (theirIssuer != str(dhost)):
-                    raise sslverify.VerifyError(
+                    raise VerifyError(
                         "self-signed %r claimed it was issued by "
                         "%r in IDENTIFY response" % (dhost, theirIssuer))
                 def storedCert(ignored):
@@ -1881,7 +1890,7 @@ class DefaultQ2QAvatar:
     def signCertificateRequest(self, certificateRequest,
                                domainCert, suggestedSerial):
         keyz = certificateRequest.getSubject().keys()
-        if keyz != ['CN']:
+        if keyz != ['commonName']:
             raise BadCertificateRequest(
                 "Don't know how to verify fields other than CN: " +
                 repr(keyz))
@@ -1963,8 +1972,8 @@ class DefaultCertificateStore:
         """
         if existingCertificate is None:
             assert '@' not in subjectName, "Don't self-sign user certs!"
-            mainDN = sslverify.DistinguishedName(commonName=subjectName)
-            mainKey = sslverify.KeyPair.generate()
+            mainDN = DistinguishedName(commonName=subjectName)
+            mainKey = KeyPair.generate()
             mainCertReq = mainKey.certificateRequest(mainDN)
             mainCertData = mainKey.signCertificateRequest(mainDN, mainCertReq,
                                                           lambda dn: True,
@@ -2029,9 +2038,9 @@ class _pemmap(object):
 class DirectoryCertificateStore(DefaultCertificateStore):
     def __init__(self, filepath):
         self.remoteStore = _pemmap(os.path.join(filepath, 'public'),
-                                   sslverify.Certificate)
+                                   Certificate)
         self.localStore = _pemmap(os.path.join(filepath, 'private'),
-                                  sslverify.PrivateCertificate)
+                                  PrivateCertificate)
 
 class MessageSender(juice.Juice):
     """
@@ -2339,18 +2348,18 @@ class Q2QService(service.MultiService, protocol.ServerFactory):
         @return: a Deferred which fires None when the certificate has been
         successfully retrieved, and errbacks if it cannot be retrieved.
         """
-        kp = sslverify.KeyPair.generate()
-        subject = sslverify.DN(commonName=str(fromAddress))
+        kp = KeyPair.generate()
+        subject = DistinguishedName(commonName=str(fromAddress))
         reqobj = kp.requestObject(subject)
         # create worthless, self-signed certificate for the moment, it will be
         # replaced later.
 
         #attemptAddress = q2q.Q2QAddress(fromAddress.domain,
         #   fromAddress.resource + '+attempt')
-        # fakeSubj = sslverify.DN(commonName=str(attemptAddress))
+        # fakeSubj = DistinguishedName(commonName=str(attemptAddress))
         fakereq = kp.requestObject(subject)
         ssigned = kp.signRequestObject(subject, fakereq, 1)
-        certpair = sslverify.PrivateCertificate.fromCertificateAndKeyPair
+        certpair = PrivateCertificate.fromCertificateAndKeyPair
         fakecert = certpair(ssigned, kp)
         apc = self.certificateStorage.addPrivateCertificate
 
@@ -2637,7 +2646,7 @@ class Q2QService(service.MultiService, protocol.ServerFactory):
                 # we are actually anonymous, whoops!
                 authorize = False
                 # we need to create our own certificate
-                ourCert = sslverify.KeyPair.generate().selfSignedCert(218374, CN='@')
+                ourCert = KeyPair.generate().selfSignedCert(218374, CN='@')
                 # feel free to cache the anonymous certificate we just made, whatever
                 cacheFrom = fromAddress
                 log.msg("Using anonymous cert for anonymous user.")
@@ -2668,7 +2677,7 @@ class Q2QService(service.MultiService, protocol.ServerFactory):
                             cacheFrom = x
                             log.msg('fakie domain cert:', fromAddress, ourCert, cacheFrom)
                         except KeyError:
-                            raise sslverify.VerifyError(
+                            raise VerifyError(
                                 "We tried to secure a connection "
                                 "between %s and %s, "
                                 "but we don't have any certificates "

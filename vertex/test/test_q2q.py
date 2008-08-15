@@ -1,11 +1,16 @@
-# Copyright 2005 Divmod, Inc.  See LICENSE file for details
+# Copyright 2005-2008 Divmod, Inc.  See LICENSE file for details
 # -*- vertex.test.test_q2q.UDPConnection -*-
+
+"""
+Tests for L{vertex.q2q}.
+"""
 
 from cStringIO import StringIO
 
 from twisted.trial import unittest
 from twisted.application import service
 from twisted.internet import reactor, protocol, defer
+from twisted.internet.ssl import DistinguishedName, PrivateCertificate, KeyPair
 from twisted.protocols import basic
 from twisted.python import log
 from twisted.python import failure
@@ -15,9 +20,11 @@ from twisted.internet.error import ConnectionDone
 from zope.interface import implements
 from twisted.internet.interfaces import IResolverSimple
 
-from epsilon import sslverify, juice
+from epsilon import juice
 
 from vertex import q2q
+
+
 def noResources(*a):
     return []
 
@@ -525,10 +532,10 @@ class ConnectionTestMixin:
             ponged = defer.Deferred()
             signer = self.serverService2.certificateStorage.getPrivateCertificate(
                 self.fromDomain).privateKey
-            req = signer.requestObject(sslverify.DN(commonName=self.toDomain))
-            sreq = signer.signRequestObject(sslverify.DN(commonName=self.fromDomain),
-                                                       req, 12345)
-            selfSignedLie = sslverify.PrivateCertificate.fromCertificateAndKeyPair(
+            req = signer.requestObject(DistinguishedName(commonName=self.toDomain))
+            sreq = signer.signRequestObject(
+                DistinguishedName(commonName=self.fromDomain), req, 12345)
+            selfSignedLie = PrivateCertificate.fromCertificateAndKeyPair(
                 sreq, signer)
             self.serverService2.connectQ2Q(self.fromAddress,
                                           self.toAddress,
@@ -536,21 +543,21 @@ class ConnectionTestMixin:
                                           OneTrickPonyClientFactory(ponged),
                                           selfSignedLie,
                                           fakeFromDomain=self.toDomain).addErrback(
-                lambda e: e.trap(sslverify.VerifyError))
+                lambda e: e.trap(q2q.VerifyError))
 
-            return self.assertFailure(ponged, sslverify.VerifyError)
+            return self.assertFailure(ponged, q2q.VerifyError)
         return x.addCallback(actualTest)
 
 
     def testBadCertRequestSubject(self):
-        kp = sslverify.KeyPair.generate()
-        subject = sslverify.DN(commonName='HACKERX',
-                               localityName='INTERNETANIA')
+        kp = KeyPair.generate()
+        subject = DistinguishedName(commonName='HACKERX',
+                                    localityName='INTERNETANIA')
         reqobj = kp.requestObject(subject)
 
         fakereq = kp.requestObject(subject)
         ssigned = kp.signRequestObject(subject, fakereq, 1)
-        certpair = sslverify.PrivateCertificate.fromCertificateAndKeyPair
+        certpair = PrivateCertificate.fromCertificateAndKeyPair
         fakecert = certpair(ssigned, kp)
         apc = self.serverService2.certificateStorage.addPrivateCertificate
 
