@@ -10,6 +10,7 @@ from cStringIO import StringIO
 from twisted.trial import unittest
 from twisted.application import service
 from twisted.internet import reactor, protocol, defer
+from twisted.internet.task import deferLater
 from twisted.internet.ssl import DistinguishedName, PrivateCertificate, KeyPair
 from twisted.protocols import basic
 from twisted.python import log
@@ -504,10 +505,6 @@ class ConnectionTestMixin:
                 liveConnection.transport.pauseProducing()
             wfc = self.dataEater.waitForCount(SIZE * 2)
             resumed = [False]
-            def deferLater(n, result=None):
-                d = defer.Deferred()
-                reactor.callLater(n, d.callback, result)
-                return d
             def shouldntHappen(x):
                 if resumed[0]:
                     return x
@@ -522,7 +519,7 @@ class ConnectionTestMixin:
                     self.failUnless(self.streamer.pauseCount > 0)
                     self.failUnless(self.streamer.resumeCount > 0)
                 return self.dataEater.waitForCount(SIZE * 2).addCallback(assertSomeStuff)
-            return deferLater(3).addCallback(keepGoing)
+            return deferLater(reactor, 3, lambda: None).addCallback(keepGoing)
         return defer.DeferredList([a, b]).addCallback(dotest)
 
 
