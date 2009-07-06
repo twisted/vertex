@@ -87,8 +87,8 @@ class Verify(juice.Command):
 
     Errors:
 
-    - chunk checksum incorrect
-    - host hasn't computed checksum for that chunk yet.
+      - chunk checksum incorrect
+      - host hasn't computed checksum for that chunk yet.
     """
 
     arguments = [('name', juice.String()),

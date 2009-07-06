@@ -7,7 +7,7 @@ messages lazily in response to UI events, caching the protocol as necessary.
 Using connection-oriented protocols, you will most likely not want to use this
 class - you might end up retrieving a cached connection in the middle of a
 chunk of data being sent.  For the purposes of this distinction, a
-'message-oriented' protocol is one which has an API which either:
+'message-oriented' protocol is one which has an API which either::
 
   a) writes only whole messages to its transport so there is never an
      opportunity to insert data into the middle of a message, or

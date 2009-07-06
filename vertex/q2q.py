@@ -125,7 +125,7 @@ class Q2QAddress(object):
 
     def __str__(self):
         """
-        Return a string of the normalized form of this address.  e.g.:
+        Return a string of the normalized form of this address.  e.g.::
 
             glyph@divmod.com    # for a user
             divmod.com          # for a domain
@@ -584,8 +584,9 @@ class Secure(juice.Command):
 
 class Listen(juice.Command):
     """
-    A simple command for registering interest with an active Q2Q connection to
-    hear from a server when others come calling.
+    A simple command for registering interest with an active Q2Q connection
+    to hear from a server when others come calling.  An occurrence of this
+    command might have this appearance on the wire::
 
         C: -Command: Listen
         C: -Ask: 1
@@ -634,7 +635,8 @@ class Virtual(juice.Command):
 class Identify(juice.Command):
     """
     Respond to an IDENTIFY command with a self-signed certificate for the
-    domain requested, assuming we are an authority for said domain.
+    domain requested, assuming we are an authority for said domain.  An
+    occurrence of this command might have this appearance on the wire::
 
         C: -Command: Identify
         C: -Ask: 1
@@ -673,7 +675,8 @@ class BindUDP(juice.Command):
 
 class SourceIP(juice.Command):
     """
-    Ask a server on the public internet what my public IP probably is.
+    Ask a server on the public internet what my public IP probably is.  An
+    occurrence of this command might have this appearance on the wire::
 
         C: -Command: Source-IP
         C: -Ask: 1
@@ -703,6 +706,8 @@ class Inbound(juice.Command):
 
     See L{Q2QService.connectQ2Q} for details.
 
+    An occurrence of this command might have this appearance on the wire::
+
         C: -Command: Inbound
         C: -Ask: 1
         C: From: glyph@divmod.com
@@ -722,12 +727,12 @@ class Inbound(juice.Command):
     Now the connection-id has been registered and either client or server can
     issue WRITE or CLOSE commands.
 
-    Failure modes:
+    Failure modes::
 
-        "NotFound": the toResource or toDomain is invalid, or the resource does
+      - "NotFound": the toResource or toDomain is invalid, or the resource does
         not speak that protocol.
 
-        "VerifyError": Authenticity or security for the requested connection
+      - "VerifyError": Authenticity or security for the requested connection
         could not be authorized.  This is a fatal error: the connection will be
         dropped.
 
@@ -953,7 +958,7 @@ class Q2Q(juice.Juice, subproducer.SuperProducer):
         which is issued for the domain for theirAddress or the full address
         given in theirAddress.
 
-        This method runs _after_ cryptographic verification of the validity of
+        This method runs B{after} cryptographic verification of the validity of
         certificates, although it does not perform any cryptographic checks
         itself.  It depends on SSL connection handshaking - *and* the
         particular certificate lookup logic which prevents spoofed Issuer
@@ -961,10 +966,9 @@ class Q2Q(juice.Juice, subproducer.SuperProducer):
         present in the certificates matching with the application-level
         security claims being made by our peer.
 
-        Example:
-
-        This is valid because both parties have properly signed certificates
-        for their usage from the domain they have been issued:
+        An example of successful verification, because both parties have
+        properly signed certificates for their usage from the domain they
+        have been issued::
 
             our current certficate:
                 issuer: divmod.com
@@ -977,9 +981,10 @@ class Q2Q(juice.Juice, subproducer.SuperProducer):
                 theirAddress: exarkun@twistedmatrix.com
             Result of verifyCertificateAllowed: None
 
-        This is invalid because domain certificates are always *self*-signed in
-        Q2Q; verisign is not a trusted certificate authority for the entire
-        internet as with some other TLS implementations:
+        An example of rejected verification, because domain certificates are
+        always B{self}-signed in Q2Q; verisign is not a trusted certificate
+        authority for the entire internet as with some other TLS
+        implementations::
 
             our current certificate:
                 issuer: divmod.com
@@ -992,9 +997,9 @@ class Q2Q(juice.Juice, subproducer.SuperProducer):
                 theirAddress: twistedmatrix.com
             Result of verifyCertificateAllowed: exception VerifyError raised
 
-        This case is OK rather than invalid because our current certificate, we
-        assume is under the control of this side of the connection, so *any*
-        claimed subject is considered acceptable.
+        Another example of successful verification, because we assume our
+        current certificate is under the control of this side of the
+        connection, so *any* claimed subject is considered acceptable::
 
             our current certificate:
                 issuer: divmod.com
@@ -1007,11 +1012,10 @@ class Q2Q(juice.Juice, subproducer.SuperProducer):
                 theirAddress: glyph@twistedmatrix.com
             Result of verifyCertificateAllowed: None
 
-        This case is OK because the user is claiming to be anonymous; there is
-        also a somewhat looser cryptographic check applied to signatures for
-        anonymous connections.
-
-        Accept anonymous connections with caution:
+        Another example of successful verification, because the user is
+        claiming to be anonymous; there is also a somewhat looser
+        cryptographic check applied to signatures for anonymous
+        connections::
 
             our current certificate:
                 issuer: divmod.com
@@ -1024,6 +1028,7 @@ class Q2Q(juice.Juice, subproducer.SuperProducer):
                 theirAddress: @
             Result of verifyCertificateAllowed: None
 
+        Accept anonymous connections with caution.
 
         @param ourAddress: a L{Q2QAddress} representing the address that we are
         supposed to have authority for, requested by our peer.
@@ -1295,10 +1300,12 @@ class Q2Q(juice.Juice, subproducer.SuperProducer):
 
     def juice_WRITE(self, box):
         """
-
         Respond to a WRITE command, sending some data over a virtual channel
         created by VIRTUAL.  The answer is simply an acknowledgement, as it is
         simply meant to note that the write went through without errors.
+
+        An occurrence of I{Write} on the wire, together with the response
+        generated by this method, might have this apperance::
 
             C: -Command: Write
             C: -Ask: 1
@@ -1318,9 +1325,11 @@ class Q2Q(juice.Juice, subproducer.SuperProducer):
 
     def juice_CLOSE(self, box):
         """
-
         Respond to a CLOSE command, dumping some data onto the stream.  As with
         WRITE, this returns an empty acknowledgement.
+
+        An occurrence of I{Close} on the wire, together with the response
+        generated by this method, might have this apperance::
 
             C: -Command: Close
             C: -Ask: 1
@@ -1377,7 +1386,10 @@ class Q2Q(juice.Juice, subproducer.SuperProducer):
     def command_SECURE(self, to, From, authorize):
         """
         Response to a SECURE command, starting TLS when necessary, and using a
-        certificate identified by the To: header.
+        certificate identified by the I{To} header.
+
+        An occurrence of I{Secure} on the wire, together with the response
+        generated by this method, might have the following appearance::
 
             C: -Command: Secure
             C: -Ask: 1
@@ -1385,10 +1397,10 @@ class Q2Q(juice.Juice, subproducer.SuperProducer):
             C: From: twistedmatrix.com
             C: Authorize: True
             C:
-        --- Client Starts TLS here with twistedmatrix.com certificate ---
+            Client Starts TLS here with twistedmatrix.com certificate
             S: -Answer: 1
             S:
-        --- Server Starts TLS here with divmod.com certificate ---
+            Server Starts TLS here with divmod.com certificate
 
         """
         if self.hostCertificate is not None:

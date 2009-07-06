@@ -14,15 +14,15 @@ from zope.interface import implements
 class Conf(dict):
     """A class to help in construction the configuration for delpoy().
 
-    Typical usage:
+    Typical usage::
 
-    from vertex.depserv import Conf
-    conf = Conf()
-    s = conf.section
-    s('pop',
-        port = 110,
-        sslPort = 995)
-    ...
+        from vertex.depserv import Conf
+        conf = Conf()
+        s = conf.section
+        s('pop',
+            port = 110,
+            sslPort = 995)
+        ...
     """
     def section(self, name, **kw):
         self.setdefault(name, {}).update(kw)
