@@ -1,3 +1,9 @@
+0.3.0 (2009-11-25):
+  - Remove use of deprecated Twisted APIs from the test suite and improve
+    some error handling as a necessary consequence.
+  - Use twisted.internet.ssl instead of epsilon.sslverify.
+  - Remove an implementation of deferLater.
+
 0.2.0 (2006-06-12):
   - Moved JUICE implementation into Epsilon.
   - Removed dependency on Nevow's formless.

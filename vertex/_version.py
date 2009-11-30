@@ -1,3 +1,3 @@
 # This is an auto-generated file. Use admin/change-versions to update.
 from twisted.python import versions
-version = versions.Version(__name__[:__name__.rfind('.')], 0, 2, 1)
+version = versions.Version(__name__[:__name__.rfind('.')], 0, 3, 0)
