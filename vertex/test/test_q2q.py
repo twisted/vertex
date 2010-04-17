@@ -21,7 +21,7 @@ from twisted.internet.error import ConnectionDone
 from zope.interface import implements
 from twisted.internet.interfaces import IResolverSimple
 
-from epsilon import juice
+from twisted.protocols.amp import UnhandledCommand, QuitBox, Command, AMP
 
 from vertex import q2q
 
@@ -79,25 +79,25 @@ class Utility(unittest.TestCase):
         cert = svc.certificateStorage.getPrivateCertificate("test.domain")
         self.failUnless(cert.getPublicKey().matches(cert.privateKey))
 
-class OneTrickPony(juice.Juice):
-    def juice_TRICK(self, box):
-        return juice.QuitBox(tricked='True')
+class OneTrickPony(AMP):
+    def command_TRICK(self, box):
+        return QuitBox(tricked='True')
 
-class OneTrickPonyServerFactory(juice.JuiceServerFactory):
+class OneTrickPonyServerFactory(protocol.ServerFactory):
     protocol = OneTrickPony
 
-class OneTrickPonyClient(juice.Juice):
+class OneTrickPonyClient(AMP):
     def connectionMade(self):
         self.sendCommand('trick').chainDeferred(self.factory.ponged)
 
-class OneTrickPonyClientFactory(juice.JuiceClientFactory):
+class OneTrickPonyClientFactory(protocol.ClientFactory):
     protocol = OneTrickPonyClient
 
     def __init__(self, ponged):
         self.ponged = ponged
 
     def buildProtocol(self, addr):
-        result = juice.JuiceClientFactory.buildProtocol(self, addr)
+        result = protocol.ClientFactory.buildProtocol(self, addr)
         self.proto = result
         return result
 
@@ -221,16 +221,16 @@ class StreamingDataFeeder(protocol.Protocol):
 class ErroneousClientError(Exception):
     pass
 
-class EngenderError(juice.Command):
+class EngenderError(Command):
     commandName = 'Engender-Error'
 
-class Break(juice.Command):
+class Break(Command):
     commandName = 'Break'
 
-class Flag(juice.Command):
+class Flag(Command):
     commandName = 'Flag'
 
-class Erroneous(juice.Juice):
+class Erroneous(AMP):
     flag = False
     def command_BREAK(self):
         raise ErroneousClientError("Zoop")
@@ -250,18 +250,18 @@ class Erroneous(juice.Juice):
         self.flag = True
     command_FLAG.command = Flag
 
-class ErroneousServerFactory(juice.JuiceServerFactory):
+class ErroneousServerFactory(protocol.ServerFactory):
     protocol = Erroneous
 
-class ErroneousClientFactory(juice.JuiceClientFactory):
+class ErroneousClientFactory(protocol.ClientFactory):
     protocol = Erroneous
 
-class Greet(juice.Command):
+class Greet(Command):
     commandName = 'Greet'
 
-class Greeter(juice.Juice, protocol.ServerFactory, protocol.ClientFactory):
-    def __init__(self, issueGreeting, startupD):
-        juice.Juice.__init__(self, issueGreeting)
+class Greeter(AMP, protocol.ServerFactory, protocol.ClientFactory):
+    def __init__(self, startupD):
+        AMP.__init__(self)
         self.startupD = startupD
 
     def buildProtocol(self, addr):
@@ -453,11 +453,13 @@ class ConnectionTestMixin:
                                         server['certificate'])
                                     yield server
 
+                        factory = protocol.ClientFactory()
+                        factory.protocol = AMP
                         _4 = self.clientClientService.connectQ2Q(
                             self.fromAddress,
                             self.toAddress,
                             'pony',
-                            juice.JuiceClientFactory(),
+                            factory,
                             chooser=chooser)
                         def _4c(ign):
                             self.failUnlessEqual(expectedList, [])
@@ -604,7 +606,7 @@ class ConnectionTestMixin:
 
         def connected(proto):
             def trapit(what):
-                what.trap(juice.UnhandledRemoteJuiceError)
+                what.trap(UnhandledCommand)
             Break().do(proto).addCallbacks(self.successIsFailure, trapit)
             return Flag().do(proto)
         d.addCallback(connected)
@@ -643,38 +645,6 @@ class TCPConnection(Q2QConnectionTestCase, ConnectionTestMixin):
     inboundTCPPortnum = 0
     udpEnabled = False
     virtualEnabled = False
-
-class TestProtocol(juice.Juice):
-    def juice_GETADDRESSINFO(self, request):
-        h = self.transport.getHost()
-        p = self.transport.getPeer()
-        return juice.Box(
-            Host_Resource=h.resource,
-            Host_Domain=h.domain,
-            Peer_Resource=p.resource,
-            Peer_Domain=p.domain)
-
-class TestServerFactory(juice.JuiceClientFactory):
-    protocol = TestProtocol
-
-# A special treat for Glyph to enjoy later.
-
-def _findService(svc, matcher):
-    try:
-        truth = matcher(svc)
-    except:
-        log.err()
-        truth = False
-    if truth:
-        yield svc
-    try:
-        i = iter(svc)
-    except:
-        # print 'Not iterable:', svc
-        return
-    for subsvc in i:
-        for blah in _findService(subsvc, matcher):
-            yield blah
 
 # class LiveServerMixin:
 #     serverDomain = 'test.domain.example.com'

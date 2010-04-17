@@ -5,7 +5,7 @@ import sys
 import struct
 import getpass
 
-from epsilon import juice
+from twisted.protocols.amp import AMP
 
 from vertex import q2q, sigma
 from twisted.python.usage import Options, UsageError
@@ -308,10 +308,7 @@ class Q2QSigma(Options):
             nex.push(sharefile, sharename, sharepeers)
         self.parent.start()
 
-class UserAdder(juice.Juice):
-    def __init__(self):
-        juice.Juice.__init__(self, False)
-
+class UserAdder(AMP):
     def connectionMade(self):
         self.d = AddUser(name=self.factory.name,
                          password=self.factory.password).do(self)

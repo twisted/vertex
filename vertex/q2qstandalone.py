@@ -4,22 +4,19 @@ import os
 
 from twisted.cred.portal import Portal
 
-from epsilon import juice
+from twisted.protocols.amp import AMP, Box, parseString
 
 from vertex import q2q
 from vertex.depserv import DependencyService, Conf
 from vertex.q2qadmin import AddUser, NotAllowed
 
-class IdentityAdmin(juice.Juice):
-
-    def __init__(self):
-        juice.Juice.__init__(self, True)
+class IdentityAdmin(AMP):
 
     def command_ADD_USER(self, name, password):
         # all security is transport security
         theDomain = self.transport.getQ2QHost().domain
         self.factory.store.addUser(theDomain, name, password)
-        return dict()
+        return {}
 
     command_ADD_USER.command = AddUser
 
@@ -49,8 +46,8 @@ class _usermap:
         if os.path.exists(userpath):
             raise NotAllowed()
         f = open(userpath, 'w')
-        f.write(juice.Box(username=username,
-                          password=password.encode('hex')).serialize())
+        f.write(Box(username=username,
+                    password=password.encode('hex')).serialize())
         f.close()
 
     def get(self, (domain, username)):
@@ -58,7 +55,7 @@ class _usermap:
         if os.path.exists(domainpath):
             filepath = os.path.join(domainpath, username+".info")
             if os.path.exists(filepath):
-                data = juice.parseString(open(filepath).read())[0]
+                data = parseString(open(filepath).read())[0]
                 return data['password'].decode('hex')
 
 class DirectoryCertificateAndUserStore(q2q.DirectoryCertificateStore):

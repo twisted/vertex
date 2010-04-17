@@ -32,7 +32,9 @@ from twisted.cred.error import UnauthorizedLogin
 
 # epsilon
 from epsilon.extime import Time
-from epsilon import juice
+from twisted.protocols.amp import Argument, Boolean, Integer, String, Unicode, ListOf, AMPList
+from twisted.protocols.amp import Box, Command, StartTLS, ProtocolSwitchCommand, AMP
+from twisted.protocols.amp import _objectsToStrings
 from epsilon.structlike import record
 
 # vertex
@@ -186,11 +188,11 @@ class Q2QTransportAddress:
             self.logical,
             self.protocol)
 
-class Q2QAddressArgument(juice.Argument):
+class Q2QAddressArgument(Argument):
     fromString = Q2QAddress.fromString
     toString = Q2QAddress.__str__
 
-class HostPort(juice.Argument):
+class HostPort(Argument):
     def toString(self, inObj):
         return "%s:%d" % tuple(inObj)
 
@@ -200,33 +202,19 @@ class HostPort(juice.Argument):
 
 
 
-class _Base64Wrapped(juice.Base64Binary):
+class _BinaryLoadable(String):
     def toString(self, arg):
         assert isinstance(arg, self.loader), "%r not %r" % (arg, self.loader)
-        return juice.Base64Binary.toString(self, arg.dump())
+        return String.toString(self, arg.dump())
 
     def fromString(self, arg):
-        return self.loader.load(juice.Base64Binary.fromString(self, arg))
+        return self.loader.load(String.fromString(self, arg))
 
-class CertReq(_Base64Wrapped):
+class CertReq(_BinaryLoadable):
     loader = CertificateRequest
 
-class Cert(_Base64Wrapped):
+class Cert(_BinaryLoadable):
     loader = Certificate
-
-class SimpleStringList(juice.Argument):
-    separator = ', '
-    def toString(self, inObj):
-        for inSeg in inObj:
-            assert self.separator not in inSeg, \
-                "%r not allowed to contain elements containing %r" % (inObj, self.separator)
-        return self.separator.join(inObj)
-
-    def fromString(self, inString):
-        if inString == '':
-            return []
-        return inString.split(self.separator)
-
 
 from twisted.internet import protocol
 
@@ -539,50 +527,38 @@ _methodFactories = {'virtual': VirtualMethod,
                     'ptcp': PTCPMethod,
                     'rptcp': RPTCPMethod}
 
-class MethodsList(SimpleStringList):
+class Method(Argument):
     def toString(self, inObj):
-        return super(MethodsList, self).toString([x.toString() for x in inObj])
+        return inObj.toString()
+
 
     def fromString(self, inString):
-        strings = super(MethodsList, self).fromString(inString)
-        accumulator = []
-        accumulate = accumulator.append
-        for string in strings:
-            f = string.split("@",1)
-            factoryName = f[0]
-            if len(f)>1:
-                factoryData = f[1]
-            else:
-                factoryData = ''
-            methodFactory = _methodFactories.get(factoryName, None)
-            if methodFactory is None:
-                factory = UnknownMethod(string)
-            else:
-                factory = methodFactory(factoryData)
-            accumulate(factory)
-        return accumulator
+        f = inString.split("@", 1)
+        factoryName = f[0]
+        if len(f) > 1:
+            factoryData = f[1]
+        else:
+            factoryData = ''
+        methodFactory = _methodFactories.get(factoryName, None)
+        if methodFactory is None:
+            factory = UnknownMethod(inString)
+        else:
+            factory = methodFactory(factoryData)
+        return factory
 
 
-class Secure(juice.Command):
+class Secure(StartTLS):
 
     commandName = "secure"
-    arguments = [
+    arguments = StartTLS.arguments + [
         ('From', Q2QAddressArgument(optional=True)),
         ('to', Q2QAddressArgument()),
-        ('authorize', juice.Boolean())
+        ('authorize', Boolean())
         ]
 
-    def makeResponse(cls, objects, proto):
-        return juice.TLSBox(*objects)
-    makeResponse = classmethod(makeResponse)
-
-    def do(self, proto, namespace=None, requiresAnswer=True):
-        d = juice.Command.do(self, proto, namespace, requiresAnswer)
-        proto.prepareTLS()
-        return d
 
 
-class Listen(juice.Command):
+class Listen(Command):
     """
     A simple command for registering interest with an active Q2Q connection
     to hear from a server when others come calling.  An occurrence of this
@@ -604,35 +580,38 @@ class Listen(juice.Command):
     commandName = 'listen'
     arguments = [
         ('From', Q2QAddressArgument()),
-        ('protocols', SimpleStringList()),
-        ('description', juice.Unicode())]
+        ('protocols', ListOf(String())),
+        ('description', Unicode())]
 
     result = []
 
-class ConnectionStartBox(juice.Box):
+class ConnectionStartBox(Box):
     def __init__(self, __transport):
         super(ConnectionStartBox, self).__init__()
         self.virtualTransport = __transport
 
-    def sendTo(self, proto):
+    # XXX Overriding a private interface
+    def _sendTo(self, proto):
         super(ConnectionStartBox, self).sendTo(proto)
         self.virtualTransport.startProtocol()
 
-class Virtual(juice.Command):
+class Virtual(Command):
     commandName = 'virtual'
     result = []
 
-    arguments = [('id', juice.Integer())]
+    arguments = [('id', Integer())]
 
     def makeResponse(cls, objects, proto):
         tpt = objects.pop('__transport__')
-        return juice.objectsToStrings(objects, cls.response,
-                                      ConnectionStartBox(tpt),
-                                      proto)
+        # XXX Using a private API
+        return _objectsToStrings(
+            objects, cls.response,
+            ConnectionStartBox(tpt),
+            proto)
 
     makeResponse = classmethod(makeResponse)
 
-class Identify(juice.Command):
+class Identify(Command):
     """
     Respond to an IDENTIFY command with a self-signed certificate for the
     domain requested, assuming we are an authority for said domain.  An
@@ -654,7 +633,7 @@ class Identify(juice.Command):
 
     response = [('certificate', Cert())]
 
-class BindUDP(juice.Command):
+class BindUDP(Command):
     """
     See UDPXMethod
     """
@@ -662,7 +641,7 @@ class BindUDP(juice.Command):
     commandName = 'bind-udp'
 
     arguments = [
-        ('protocol', juice.String()),
+        ('protocol', String()),
         ('q2qsrc', Q2QAddressArgument()),
         ('q2qdst', Q2QAddressArgument()),
         ('udpsrc', HostPort()),
@@ -673,7 +652,7 @@ class BindUDP(juice.Command):
 
     response = []
 
-class SourceIP(juice.Command):
+class SourceIP(Command):
     """
     Ask a server on the public internet what my public IP probably is.  An
     occurrence of this command might have this appearance on the wire::
@@ -691,9 +670,9 @@ class SourceIP(juice.Command):
 
     arguments = []
 
-    response = [('ip', juice.String())]
+    response = [('ip', String())]
 
-class Inbound(juice.Command):
+class Inbound(Command):
     """
     Request information about where to connect to a particular resource.
 
@@ -755,20 +734,20 @@ class Inbound(juice.Command):
     commandName = 'inbound'
     arguments = [('From', Q2QAddressArgument()),
                  ('to', Q2QAddressArgument()),
-                 ('protocol', juice.String()),
+                 ('protocol', String()),
                  ('udp_source', HostPort(optional=True))]
 
-    response = [('listeners', juice.JuiceList(
-                [('id', juice.String()),
+    response = [('listeners', AMPList(
+                [('id', String()),
                  ('certificate', Cert(optional=True)),
-                 ('methods', MethodsList()),
+                 ('methods', ListOf(Method())),
                  ('expires', juice.Time()),
-                 ('description', juice.Unicode())]))]
+                 ('description', Unicode())]))]
 
     errors = {KeyError: "NotFound"}
     fatalErrors = {VerifyError: "VerifyError"}
 
-class Outbound(juice.Command):
+class Outbound(Command):
     """Similar to Inbound, but _requires that the recipient already has the
     id parameter as an outgoing connection attempt_.
     """
@@ -776,42 +755,36 @@ class Outbound(juice.Command):
 
     arguments = [('From', Q2QAddressArgument()),
                  ('to', Q2QAddressArgument()),
-                 ('protocol', juice.String()),
-                 ('id', juice.String()),
-                 ('methods', MethodsList())]
+                 ('protocol', String()),
+                 ('id', String()),
+                 ('methods', ListOf(Method()))]
 
     response = []
 
     errors = {AttemptsFailed: 'AttemptsFailed'}
 
-class Sign(juice.Command):
+class Sign(Command):
     commandName = 'sign'
     arguments = [('certificate_request', CertReq()),
-                 ('password', juice.Base64Binary())]
+                 ('password', String())]
 
     response = [('certificate', Cert())]
 
     errors = {KeyError: "NoSuchUser",
               BadCertificateRequest: "BadCertificateRequest"}
 
-class Choke(juice.Command):
+class Choke(Command):
     """Ask our peer to be quiet for a while.
     """
     commandName = 'Choke'
-    arguments = [('id', juice.Integer())]
+    arguments = [('id', Integer())]
 
 
-class Unchoke(juice.Command):
+class Unchoke(Command):
     """Reverse the effects of a choke.
     """
     commandName = 'Unchoke'
-    arguments = [('id', juice.Integer())]
-
-def textEncode(S):
-    return S.encode('base64').replace('\n', '')
-
-def textDecode(S):
-    return S.decode('base64')
+    arguments = [('id', Integer())]
 
 def safely(f, *a, **k):
     """try/except around something, w/ twisted error handling.
@@ -821,7 +794,7 @@ def safely(f, *a, **k):
     except:
         log.err()
 
-class Q2Q(juice.Juice, subproducer.SuperProducer):
+class Q2Q(AMP, subproducer.SuperProducer):
     """ Quotient to Quotient protocol.
 
     At a low level, this uses a protocol called 'Juice' (JUice Is Concurrent
@@ -850,10 +823,9 @@ class Q2Q(juice.Juice, subproducer.SuperProducer):
         L{Q2QService.connectQ2Q} and L{Q2QService.listenQ2Q}.
         """
         subproducer.SuperProducer.__init__(self)
-        juice.Juice.__init__(self, *a, **kw)
+        AMP.__init__(self, *a, **kw)
 
     def connectionMade(self):
-        ""
         self.producingTransports = {}
         self.connections = {}
         self.listeningClient = []
@@ -874,7 +846,7 @@ class Q2Q(juice.Juice, subproducer.SuperProducer):
 
     def connectionLost(self, reason):
         ""
-        juice.Juice.connectionLost(self, reason)
+        AMP.connectionLost(self, reason)
         self._uncacheMe()
         self.producingTransports = {}
         for key, value in self.listeningClient:
@@ -1283,7 +1255,7 @@ class Q2Q(juice.Juice, subproducer.SuperProducer):
         except:
             writeDeferred.errback()
         else:
-            writeDeferred.callback(juice.Box())
+            writeDeferred.callback(Box())
 
 
     def command_CHOKE(self, id):
@@ -1298,7 +1270,7 @@ class Q2Q(juice.Juice, subproducer.SuperProducer):
         return {}
     command_UNCHOKE.command = Unchoke
 
-    def juice_WRITE(self, box):
+    def amp_WRITE(self, box):
         """
         Respond to a WRITE command, sending some data over a virtual channel
         created by VIRTUAL.  The answer is simply an acknowledgement, as it is
@@ -1319,11 +1291,11 @@ class Q2Q(juice.Juice, subproducer.SuperProducer):
 
         """
         connection = self.connections[int(box['id'])]
-        data = box[juice.BODY]
+        data = box['body']
         connection.dataReceived(data)
-        return juice.Box()
+        return {}
 
-    def juice_CLOSE(self, box):
+    def amp_CLOSE(self, box):
         """
         Respond to a CLOSE command, dumping some data onto the stream.  As with
         WRITE, this returns an empty acknowledgement.
@@ -1340,7 +1312,7 @@ class Q2Q(juice.Juice, subproducer.SuperProducer):
 
         """
         self.connections[int(box['id'])].connectionLost(CONNECTION_DONE)
-        return juice.Box()
+        return {}
 
     def command_SIGN(self, certificate_request, password):
         """
@@ -1462,7 +1434,7 @@ class Q2Q(juice.Juice, subproducer.SuperProducer):
         """
         CS = self.service.certificateStorage
         host = str(From.domainAddress())
-        p = juice.Juice(False)
+        p = AMP()
         p.wrapper = self.wrapper
         f = protocol.ClientCreator(reactor, lambda: p)
         connD = f.connectTCP(host, port)
@@ -1726,25 +1698,25 @@ class SeparateConnectionTransport(object):
             self.subProtocol.connectionLost(reason)
             self.subProtocol = None
 
-class WhoAmI(juice.Command):
+class WhoAmI(Command):
     commandName = 'Who-Am-I'
 
     response = [
         ('address', HostPort()),
         ]
 
-class RetrieveConnection(juice.ProtocolSwitchCommand):
+class RetrieveConnection(ProtocolSwitchCommand):
     commandName = 'Retrieve-Connection'
 
     arguments = [
-        ('identifier', juice.String()),
+        ('identifier', String()),
         ]
 
     fatalErrors = {KeyError: "NoSuchConnection"}
 
-class Q2QBootstrap(juice.Juice):
-    def __init__(self, issueGreeting, connIdentifier=None, protoFactory=None):
-        juice.Juice.__init__(self, issueGreeting)
+class Q2QBootstrap(AMP):
+    def __init__(self, connIdentifier=None, protoFactory=None):
+        AMP.__init__(self)
         assert connIdentifier is None or isinstance(connIdentifier, (str))
         self.connIdentifier = connIdentifier
         self.protoFactory = protoFactory
@@ -2054,11 +2026,11 @@ class DirectoryCertificateStore(DefaultCertificateStore):
         self.localStore = _pemmap(os.path.join(filepath, 'private'),
                                   PrivateCertificate)
 
-class MessageSender(juice.Juice):
+class MessageSender(AMP):
     """
     """
 
-theMessageFactory = juice.JuiceClientFactory()
+theMessageFactory = protocol.ClientFactory()
 theMessageFactory.protocol = MessageSender
 
 class _MessageChannel(object):
@@ -2096,7 +2068,7 @@ class Q2QClientFactory(protocol.ClientFactory):
         return p
 
 
-class YourAddress(juice.Command):
+class YourAddress(Command):
     arguments = [
         ('address', HostPort()),
         ]

@@ -15,7 +15,7 @@ from twisted.internet import protocol
 
 from twisted.python.filepath import FilePath
 
-from epsilon import juice
+from twisted.protocols.amp import Integer, String, Command, AMP
 
 from vertex import q2q
 from vertex import bits
@@ -31,7 +31,7 @@ PROTOCOL_NAME = 'sigma'
 class VerifyError(Exception):
     pass
 
-class BitArrayArgument(juice.String):
+class BitArrayArgument(String):
     def toString(self, arr):
         return str(arr.size) + ':' + arr.bytes.tostring()
 
@@ -41,35 +41,35 @@ class BitArrayArgument(juice.String):
         b.fromstring(bytes)
         return bits.BitArray(b, int(size))
 
-class Put(juice.Command):
+class Put(Command):
     """
     Tells the remote end it should request a file from me.
     """
 
-    arguments = [("name", juice.String())]
+    arguments = [("name", String())]
 
 
-class Get(juice.Command):
+class Get(Command):
     """
     Tells the remote it should start sending me chunks of a file.
     """
 
-    arguments = [("name", juice.String()),
+    arguments = [("name", String()),
                  ('mask', BitArrayArgument(optional=True))]
 
-    response = [("size", juice.Integer())] # number of octets!!
+    response = [("size", Integer())] # number of octets!!
 
 
-class Data(juice.Command):
+class Data(Command):
     """
     Sends some data for a transfer.
     """
 
-    arguments = [('name', juice.String()),
-                 ('chunk', juice.Integer()),
-                 (juice.BODY, juice.String())]
+    arguments = [('name', String()),
+                 ('chunk', Integer()),
+                 ('body', String())]
 
-class Introduce(juice.Command):
+class Introduce(Command):
     """
     Tells the remote end about another node which should have information about
     this transfer.
@@ -79,9 +79,9 @@ class Introduce(juice.Command):
     """
 
     arguments = [('peer', q2q.Q2QAddressArgument()),
-                 ('name', juice.String())]
+                 ('name', String())]
 
-class Verify(juice.Command):
+class Verify(Command):
     """
     Verify that the checksum of the given chunk is correct.
 
@@ -91,10 +91,10 @@ class Verify(juice.Command):
       - host hasn't computed checksum for that chunk yet.
     """
 
-    arguments = [('name', juice.String()),
+    arguments = [('name', String()),
                  ('peer', q2q.Q2QAddressArgument()),
-                 ('chunk', juice.Integer()),
-                 ('sha1sum', juice.String())]
+                 ('chunk', Integer()),
+                 ('sha1sum', String())]
 
 
 
@@ -108,13 +108,13 @@ def countChunks(bytes):
     div += bool(mod)
     return div
 
-class SigmaProtocol(juice.Juice):
+class SigmaProtocol(AMP):
     """I am a connection to a peer who has some resources I want in the
     file-swarming network.
     """
 
-    def __init__(self, issueGreeting, nexus):
-        juice.Juice.__init__(self, issueGreeting)
+    def __init__(self, nexus):
+        AMP.__init__(self)
         self.nexus = nexus
         self.sentTransloads = []
 
