@@ -230,7 +230,17 @@ class Break(Command):
 class Flag(Command):
     commandName = 'Flag'
 
+class FatalError(Exception):
+    pass
+
+class Fatal(Command):
+    fatalErrors = {FatalError: "quite bad"}
+
 class Erroneous(AMP):
+    def _fatal(self):
+        raise FatalError("This is fatal.")
+    Fatal.responder(_fatal)
+
     flag = False
     def _break(self):
         raise ErroneousClientError("Zoop")
@@ -609,15 +619,10 @@ class ConnectionTestMixin:
             ErroneousClientFactory())
 
         def connected(proto):
-            d1 = self.assertFailure(proto.callRemote(Break), UnknownRemoteError)
-            d2 = self.assertFailure(proto.callRemote(Flag), ConnectionDone)
+            d1 = self.assertFailure(proto.callRemote(Fatal), FatalError)
+            d2 = proto.callRemote(Flag).addCallback(self.assertEquals, {})
             return defer.gatherResults([d1, d2])
         d.addCallback(connected)
-        def cbDisconnected(err):
-            self.assertEqual(
-                len(self.flushLoggedErrors(ErroneousClientError)),
-                1)
-        d.addCallback(cbDisconnected)
         return d
 
 
