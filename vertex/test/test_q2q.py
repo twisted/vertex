@@ -609,12 +609,10 @@ class ConnectionTestMixin:
             ErroneousClientFactory())
 
         def connected(proto):
-            def trapit(what):
-                what.trap(UnhandledCommand)
-            proto.callRemote(Break).addCallbacks(self.successIsFailure, trapit)
-            return proto.callRemote(Flag)
+            d1 = self.assertFailure(proto.callRemote(Break), UnknownRemoteError)
+            d2 = self.assertFailure(proto.callRemote(Flag), ConnectionDone)
+            return defer.gatherResults([d1, d2])
         d.addCallback(connected)
-        d = self.assertFailure(d, ConnectionDone)
         def cbDisconnected(err):
             self.assertEqual(
                 len(self.flushLoggedErrors(ErroneousClientError)),
