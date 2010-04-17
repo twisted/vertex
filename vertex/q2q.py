@@ -1,4 +1,4 @@
-# -*- test-case-name: vertex.test.test_q2q -*-
+# -*- test-case-name: vertex.test.test_q2q.UDPConnection.testTwoBadWrites -*-
 # Copyright 2005-2008 Divmod, Inc.  See LICENSE file for details
 
 """
@@ -1327,7 +1327,9 @@ class Q2Q(AMP, subproducer.SuperProducer):
             S:
 
         """
-        self.connections[int(box['id'])].connectionLost(Failure(CONNECTION_DONE))
+        # The connection is removed from the mapping by connectionLost.
+        connection = self.connections[int(box['id'])]
+        connection.connectionLost(Failure(CONNECTION_DONE))
         return AmpBox()
 
 
@@ -1840,16 +1842,29 @@ class VirtualTransport(subproducer.SubProducer):
             # print 'omg wtf loseConnection!???!'
             return
         self.disconnecting = True
-        self.q2q.callRemoteString('close', id=str(self.id)).addCallbacks(
-            lambda ign: self.connectionLost(Failure(CONNECTION_DONE)),
-            self.connectionLost, errbackArgs=("yep",))
+        d = self.q2q.callRemoteString('close', id=str(self.id))
+        def cbClosed(ignored):
+            self.connectionLost(Failure(CONNECTION_DONE))
+        def ebClosed(reason):
+            if self.id in self.q2q.connections:
+                self.connectionLost(reason)
+            elif not reason.check(error.ConnectionDone):
+                # Anything but a ConnectionDone (or similar things, perhaps)
+                # is fishy.  Like an IndexError, that'd be wacko.  But a
+                # ConnectionDone when self.id is already out of the Q2Q's
+                # connections mapping means the connection was closed after
+                # we thought it was supposed to be closed.  No harm there.
+                log.err(reason, "Close virtual #%d failed" % (self.id,))
+        d.addCallbacks(cbClosed, ebClosed)
 
-    def connectionLost(self, reason, errback=False):
+
+    def connectionLost(self, reason):
         del self.q2q.connections[self.id]
         if self.protocol is not None:
             self.protocol.connectionLost(reason)
         if self.isClient:
             self.protocolFactory.clientConnectionLost(None, reason)
+
 
     def dataReceived(self, data):
         try:
