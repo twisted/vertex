@@ -9,6 +9,7 @@ import itertools
 
 from epsilon.pending import PendingEvent
 
+from twisted.python.failure import Failure
 from twisted.internet import protocol, error, reactor, defer
 from twisted.internet.main import CONNECTION_DONE
 from twisted.python import log, util
@@ -760,7 +761,7 @@ class PTCPConnection(tcpdfa.TCP):
         assert not self.disconnected
         self.disconnected = True
         try:
-            self.protocol.connectionLost(CONNECTION_DONE)
+            self.protocol.connectionLost(Failure(CONNECTION_DONE))
         except:
             log.err()
         self.protocol = None

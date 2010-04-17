@@ -80,7 +80,7 @@ class Utility(unittest.TestCase):
         self.failUnless(cert.getPublicKey().matches(cert.privateKey))
 
 class OneTrickPony(AMP):
-    def command_TRICK(self, box):
+    def amp_TRICK(self, box):
         return QuitBox(tricked='True')
 
 class OneTrickPonyServerFactory(protocol.ServerFactory):
@@ -88,7 +88,7 @@ class OneTrickPonyServerFactory(protocol.ServerFactory):
 
 class OneTrickPonyClient(AMP):
     def connectionMade(self):
-        self.sendCommand('trick').chainDeferred(self.factory.ponged)
+        self.callRemoteString('trick').chainDeferred(self.factory.ponged)
 
 class OneTrickPonyClientFactory(protocol.ClientFactory):
     protocol = OneTrickPonyClient
@@ -232,23 +232,23 @@ class Flag(Command):
 
 class Erroneous(AMP):
     flag = False
-    def command_BREAK(self):
+    def _break(self):
         raise ErroneousClientError("Zoop")
-    command_BREAK.command = Break
+    Break.responder(_break)
 
-    def command_ENGENDER_ERROR(self):
+    def _engenderError(self):
         def ebBroken(err):
             err.trap(ConnectionDone)
             # This connection is dead.  Avoid having an error logged by turning
             # this into success; the result can't possibly get to the other
             # side, anyway. -exarkun
             return {}
-        return Break().do(self).addErrback(ebBroken)
-    command_ENGENDER_ERROR.command = EngenderError
+        return self.callRemote(Break).addErrback(ebBroken)
+    EngenderError.responder(_engenderError)
 
-    def command_FLAG(self):
+    def _flag(self):
         self.flag = True
-    command_FLAG.command = Flag
+    Flag.responder(_flag)
 
 class ErroneousServerFactory(protocol.ServerFactory):
     protocol = Erroneous
@@ -260,7 +260,8 @@ class Greet(Command):
     commandName = 'Greet'
 
 class Greeter(AMP, protocol.ServerFactory, protocol.ClientFactory):
-    def __init__(self, startupD):
+    def __init__(self, isServer, startupD):
+        self.isServer = isServer
         AMP.__init__(self)
         self.startupD = startupD
 
@@ -268,12 +269,12 @@ class Greeter(AMP, protocol.ServerFactory, protocol.ClientFactory):
         return self
 
     def connectionMade(self):
-        Greet().do(self).chainDeferred(self.startupD)
+        self.callRemote(Greet).chainDeferred(self.startupD)
 
-    def command_GREET(self):
+    def _greet(self):
         self.greeted = True
         return dict()
-    command_GREET.command = Greet
+    Greet.responder(_greet)
 
 class Q2QConnectionTestCase(unittest.TestCase):
     streamer = None
@@ -561,8 +562,10 @@ class ConnectionTestMixin:
         apc = self.serverService2.certificateStorage.addPrivateCertificate
 
         def _2(secured):
-            D = q2q.Sign(certificate_request=reqobj,
-                         password='itdoesntmatter').do(secured)
+            D = secured.callRemote(
+                q2q.Sign,
+                certificate_request=reqobj,
+                password='itdoesntmatter')
             def _1(dcert):
                 cert = dcert['certificate']
                 privcert = certpair(cert, kp)
@@ -586,7 +589,7 @@ class ConnectionTestMixin:
             self.fromAddress, self.toAddress, 'error',
             ErroneousClientFactory())
         def connected(proto):
-            return EngenderError().do(proto)
+            return proto.callRemote(EngenderError)
         d.addCallback(connected)
         d = self.assertFailure(d, ConnectionDone)
         def cbDisconnected(err):
@@ -607,8 +610,8 @@ class ConnectionTestMixin:
         def connected(proto):
             def trapit(what):
                 what.trap(UnhandledCommand)
-            Break().do(proto).addCallbacks(self.successIsFailure, trapit)
-            return Flag().do(proto)
+            proto.callRemote(Break).addCallbacks(self.successIsFailure, trapit)
+            return proto.callRemote(Flag)
         d.addCallback(connected)
         d = self.assertFailure(d, ConnectionDone)
         def cbDisconnected(err):
