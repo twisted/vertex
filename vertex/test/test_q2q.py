@@ -21,7 +21,7 @@ from twisted.internet.error import ConnectionDone
 from zope.interface import implements
 from twisted.internet.interfaces import IResolverSimple
 
-from twisted.protocols.amp import UnhandledCommand, QuitBox, Command, AMP
+from twisted.protocols.amp import UnhandledCommand, UnknownRemoteError, QuitBox, Command, AMP
 
 from vertex import q2q
 
@@ -248,6 +248,7 @@ class Erroneous(AMP):
 
     def _flag(self):
         self.flag = True
+        return {}
     Flag.responder(_flag)
 
 class ErroneousServerFactory(protocol.ServerFactory):
@@ -591,7 +592,7 @@ class ConnectionTestMixin:
         def connected(proto):
             return proto.callRemote(EngenderError)
         d.addCallback(connected)
-        d = self.assertFailure(d, ConnectionDone)
+        d = self.assertFailure(d, UnknownRemoteError)
         def cbDisconnected(err):
             self.assertEqual(
                 len(self.flushLoggedErrors(ErroneousClientError)),
