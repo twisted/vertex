@@ -1084,7 +1084,7 @@ class Q2Q(AMP, subproducer.SuperProducer):
             (ourCert, peerCert,
              ourAddress, theirAddress))
 
-    def command_LISTEN(self, protocols, From, description):
+    def _listen(self, protocols, From, description):
         """
         Implementation of L{Listen}.
         """
@@ -1105,8 +1105,8 @@ class Q2Q(AMP, subproducer.SuperProducer):
             self.listeningClient.append((key, value))
             self.service.listeningClients.setdefault(key, []).append(value)
         return {}
+    Listen.responder(_listen)
 
-    command_LISTEN.command = Listen
 
     def _inbound(self, From, to, protocol, udp_source=None):
         """
@@ -1203,15 +1203,15 @@ class Q2Q(AMP, subproducer.SuperProducer):
         key = (to, protocol)
         if key in self.service.listeningClients:
             args = dict(From=From,
-                        To=to,
-                        Protocol=protocol,
-                        UDP_Source=udp_source)
+                        to=to,
+                        protocol=protocol,
+                        udp_source=udp_source)
             DL = []
             lclients = self.service.listeningClients[key]
             log.msg("listeners found for %s:%r" % (to, protocol))
             for listener, listenCert, desc in lclients:
                 log.msg("relaying inbound to %r via %r" % (to, listener))
-                DL.append(Inbound(**args).do(listener).addCallback(
+                DL.append(listener.callRemote(Inbound, **args).addCallback(
                     self._massageClientInboundResponse, listener, result))
 
             def allListenerResponses(x):
@@ -1400,7 +1400,7 @@ class Q2Q(AMP, subproducer.SuperProducer):
             D = CS.getSelfSignedCertificate(str(From.domainAddress()))
         else:
             self.authorized = False
-            return {'tls_localCertificates': ourCert}
+            return {'tls_localCertificate': ourCert}
 
         def hadCert(peerSigned):
             self.authorized = True
@@ -1565,10 +1565,12 @@ class Q2Q(AMP, subproducer.SuperProducer):
         d.addCallback(gotResults)
         return d
 
+
     def listen(self, fromAddress, protocols, serverDescription):
-        return Listen(From=fromAddress,
-                      Protocols=protocols,
-                      Description=serverDescription).do(self)
+        return self.callRemote(
+            Listen, From=fromAddress,
+            protocols=protocols, description=serverDescription)
+
 
     def connect(self, From, to,
                 protocolName, clientFactory,
