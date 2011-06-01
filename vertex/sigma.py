@@ -60,14 +60,18 @@ class Get(Command):
     response = [("size", Integer())] # number of octets!!
 
 
+
 class Data(Command):
     """
     Sends some data for a transfer.
     """
+    requiresAnswer = False
 
     arguments = [('name', String()),
                  ('chunk', Integer()),
                  ('body', String())]
+
+
 
 class Introduce(Command):
     """
@@ -77,9 +81,11 @@ class Introduce(Command):
     Peer: the address of the peer
     Name: the name of the file given.
     """
-
+    requiresAnswer = False
     arguments = [('peer', q2q.Q2QAddressArgument()),
                  ('name', String())]
+
+
 
 class Verify(Command):
     """
@@ -118,7 +124,8 @@ class SigmaProtocol(AMP):
         self.nexus = nexus
         self.sentTransloads = []
 
-    def command_GET(self, name, mask=None):
+
+    def _get(self, name, mask=None):
         peer = self.transport.getQ2QPeer()
         tl = self.nexus.transloads[name]
         size = tl.getSize()
@@ -132,31 +139,31 @@ class SigmaProtocol(AMP):
             # send a reciprocal GET
             self.get(name, tl.mask)
         return dict(size=size)
+    Get.responder(_get)
 
-    command_GET.command = Get
 
-    def command_DATA(self, name, chunk, body):
+    def _data(self, name, chunk, body):
         self.nexus.transloads[name].chunkReceived(
             self.transport.getQ2QPeer(), chunk, body)
         return DONE
+    Data.responder(_data)
 
-    command_DATA.command = Data
 
-    def command_PUT(self, name):
+    def _put(self, name):
         peer = self.transport.getQ2QPeer()
         incompleteFilePath, fullFilePath = self.nexus.ui.allocateFile(
             name, peer)
         self.nexus.pull(incompleteFilePath, fullFilePath, name, peer)
         return DONE
+    Put.responder(_put)
 
-    command_PUT.command = Put
 
-    def command_VERIFY(self, peer, name, chunk, sha1sum):
+    def _verify(self, peer, name, chunk, sha1sum):
         if self.nexus.transloads[name].verifyLocalChunk(peer, chunk, sha1sum):
             return dict()
         raise RuntimeError("checksum incorrect")
+    Verify.responder(_verify)
 
-    command_VERIFY.command = Verify
 
     def data(self, name, chunk, body):
         """
@@ -166,16 +173,15 @@ class SigmaProtocol(AMP):
 
         Sends a chunk of data to a peer.
         """
-        Data(name=name,
-             chunk=chunk,
-             body=body).do(self,
-                           requiresAnswer=False)
+        self.callRemote(Data, name=name, chunk=chunk, body=body)
+
 
     def introduce(self, name, peerToIntroduce):
-        Introduce(peer=peerToIntroduce,
-                  name=name).do(self, requiresAnswer=False)
+        self.callRemote(
+            Introduce, peer=peerToIntroduce, name=name)
 
-    def command_INTRODUCE(self, peer, name):
+
+    def _introduce(self, peer, name):
         # Like a PUT, really, but assuming the transload is already
         # established.
 
@@ -192,8 +198,8 @@ class SigmaProtocol(AMP):
         self.nexus.connectPeer(peer).addCallback(
             lambda peerProto: peerProto.get(name, t.mask))
         return {}
+    Introduce.responder(_introduce)
 
-    command_INTRODUCE.command = Introduce
 
     def get(self, name, mask=None):
         """
@@ -211,13 +217,13 @@ class SigmaProtocol(AMP):
             peerk = PeerKnowledge(bits.BitArray(size=len(tl.mask), default=1))
             peerz[mypeer] = peerk
         peerk.sentGet = True
-        return Get(name=name, mask=mask).do(self).addCallback(lambda r: r['size'])
+        return self.callRemote(
+            Get, name=name, mask=mask).addCallback(lambda r: r['size'])
+
 
     def verify(self, name, peer, chunkNumber, sha1sum):
-        return Verify(name=name,
-                      peer=peer,
-                      chunk=chunkNumber,
-                      sha1sum=sha1sum).do(self)
+        return self.callRemote(
+            Verify, name=name, peer=peer, chunk=chunkNumber, sha1sum=sha1sum)
 
 
     def connectionMade(self):
@@ -548,7 +554,7 @@ class Transload:
 
     def putToPeers(self, peers):
         def eachPeer(proto):
-            Put(name=self.name).do(proto)
+            proto.callRemote(Put, name=self.name)
             return proto
 
         for peer in peers:
@@ -592,13 +598,13 @@ class SigmaServerFactory(protocol.ServerFactory):
     def __init__(self, nexus):
         self.nexus = nexus
     def buildProtocol(self, addr):
-        return SigmaProtocol(True, self.nexus)
+        return SigmaProtocol(self.nexus)
 
 class SigmaClientFactory(protocol.ClientFactory):
     def __init__(self, nexus):
         self.nexus = nexus
     def buildProtocol(self, addr):
-        return SigmaProtocol(True, self.nexus)
+        return SigmaProtocol(self.nexus)
 
 class BaseTransloadUI:
 
