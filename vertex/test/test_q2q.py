@@ -605,7 +605,7 @@ class ConnectionTestMixin:
         d.addCallback(connected)
         # The unhandled, undeclared error causes the connection to be closed
         # from the other side.
-        d = self.assertFailure(d, ConnectionDone)
+        d = self.assertFailure(d, ConnectionDone, UnknownRemoteError)
         def cbDisconnected(err):
             self.assertEqual(
                 len(self.flushLoggedErrors(ErroneousClientError)),
