@@ -1753,15 +1753,15 @@ class Q2QBootstrap(AMP):
         """
         def cbWhoAmI(result):
             return result['address']
-        return WhoAmI().do(self).addCallback(cbWhoAmI)
+        return self.callRemote(WhoAmI).addCallback(cbWhoAmI)
 
 
-    def command_WHO_AM_I(self):
+    def _whoami(self):
         peer = self.transport.getPeer()
         return {
             'address': (peer.host, peer.port),
             }
-    command_WHO_AM_I.command = WhoAmI
+    WhoAmI.responder(_whoami)
 
 
     def retrieveConnection(self, identifier, factory):
@@ -2114,13 +2114,17 @@ class YourAddress(Command):
         ]
 
 
+
 class AddressDiscoveryProtocol(Q2QBootstrap):
     def __init__(self, addrDiscDef):
-        Q2QBootstrap.__init__(self, False)
+        Q2QBootstrap.__init__(self)
         self.addrDiscDef = addrDiscDef
+
 
     def connectionMade(self):
         self.whoami().chainDeferred(self.addrDiscDef)
+
+
 
 class _AddressDiscoveryFactory(protocol.ClientFactory):
     def __init__(self, addressDiscoveredDeferred):
