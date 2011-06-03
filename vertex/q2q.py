@@ -2168,10 +2168,10 @@ class PTCPConnectionDispatcher(object):
         p.write('NAT!', (host, port))
         return sourcePort
 
-    def bindNewPort(self, portNum=0):
+    def bindNewPort(self, portNum=0, iface=''):
         iPortNum = portNum
         proto = ptcp.PTCP(self.factory)
-        p = reactor.listenUDP(portNum, proto)
+        p = reactor.listenUDP(portNum, proto, interface=iface)
         portNum = p.getHost().port
         log.msg("Binding PTCP/UDP %d=%d" % (iPortNum,portNum))
         self._ports[portNum] = (p, proto)
@@ -2488,11 +2488,10 @@ class Q2QService(service.MultiService, protocol.ServerFactory):
             self.dispatcher = PTCPConnectionDispatcher(self._bootstrapFactory)
 
         if self.q2qPortnum is not None:
-            self.q2qPort = reactor.listenTCP(
-                self.q2qPortnum, self)
+            self.q2qPort = reactor.listenTCP(self.q2qPortnum, self)
             self.q2qPortnum = self.q2qPort.getHost().port
             if self.dispatcher is not None:
-                self.sharedUDPPortnum = self.dispatcher.bindNewPort(self.q2qPortnum)
+                self.sharedUDPPortnum = self.dispatcher.bindNewPort(self.q2qPortnum, iface=self.publicIP or '')
 
         if self.inboundTCPPortnum is not None:
             self.inboundTCPPort = reactor.listenTCP(

@@ -297,17 +297,20 @@ class Q2QConnectionTestCase(unittest.TestCase):
     toResource = 'serverResource'
 
     fromDomain = 'origin.domain.example.com'
+    fromIP = '127.0.0.1'
     spoofedDomain = 'spoofed.domain.example.com'
     toDomain = 'destination.domain.example.org'
+    toIP = '127.0.0.2'
 
     userReverseDNS = 'i.watch.too.much.tv'
     inboundTCPPortnum = 0
     udpEnabled = False
     virtualEnabled = False
 
-    def _makeQ2QService(self, certificateEntity, pff=None):
+    def _makeQ2QService(self, certificateEntity, publicIP, pff=None):
         svc = q2q.Q2QService(pff, q2qPortnum=0,
-                             inboundTCPPortnum=self.inboundTCPPortnum)
+                             inboundTCPPortnum=self.inboundTCPPortnum,
+                             publicIP=publicIP)
         svc.udpEnabled = self.udpEnabled
         svc.virtualEnabled = self.virtualEnabled
         if '@' not in certificateEntity:
@@ -343,13 +346,13 @@ class Q2QConnectionTestCase(unittest.TestCase):
 
         # Set up a know-nothing service object for the client half of the
         # conversation.
-        self.serverService2 = self._makeQ2QService(self.fromDomain, noResources)
+        self.serverService2 = self._makeQ2QService(self.fromDomain, self.fromIP, noResources)
 
         # Do likewise for the server half of the conversation.  Also, allow
         # test methods to set up some trivial resources which we can attempt to
         # access from the client.
         self.resourceMap = {}
-        self.serverService = self._makeQ2QService(self.toDomain,
+        self.serverService = self._makeQ2QService(self.toDomain, self.toIP,
                                                   self.protocolFactoryLookup)
 
         self.msvc = service.MultiService()
@@ -398,7 +401,7 @@ class ConnectionTestMixin:
     def _addClientService(self, username,
                           privateSecret, serverService,
                           serverDomain):
-        svc = self._makeQ2QService(username + '@' + serverDomain)
+        svc = self._makeQ2QService(username + '@' + serverDomain, None)
         serverService.certificateStorage.addUser(serverDomain,
                                                  username,
                                                  privateSecret)
