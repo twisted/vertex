@@ -832,13 +832,65 @@ class PTCPAddress(object):
             self.pseudoPeerPort)
 
 class PTCP(protocol.DatagramProtocol):
+    """
+    L{PTCP} implements a strongly TCP-like protocol on top of UDP.  It
+    provides a transport which is connection-oriented, streaming,
+    ordered, and reliable.
+
+    @ivar factory: A L{ServerFactory} which is used to create
+        L{IProtocol} providers whenever a new PTCP connection is made
+        to this port.
+
+    @ivar _connections: A mapping of endpoint addresses to connection
+        objects.  These are the active connections being multiplexed
+        over this UDP port.  Many PTCP connections may run over the
+        same L{PTCP} instance, communicating with many different
+        remote hosts as well as multiplexing different PTCP
+        connections to the same remote host.  The mapping keys,
+        endpoint addresses, are three-tuples of:
+
+            - The destination pseudo-port which is always C{1}
+            - The source pseudo-port
+            - A (host, port) tuple giving the UDP address of a PTCP
+              peer holding the other side of the connection
+
+        The mapping values, connection objects, are L{PTCPConnection}
+        instances.
+    @type _connections: C{dict}
+
+    """
     # External API
 
     def __init__(self, factory):
         self.factory = factory
         self._allConnectionsClosed = PendingEvent()
 
+
     def connect(self, factory, host, port, pseudoPort=1):
+        """
+        Attempt to establish a new connection via PTCP to the given
+        remote address.
+
+        @param factory: A L{ClientFactory} which will be used to
+            create an L{IProtocol} provider if the connection is
+            successfully set up, or which will have failure callbacks
+            invoked on it otherwise.
+
+        @param host: The IP address of another listening PTCP port to
+            connect to.
+        @type host: C{str}
+
+        @param port: The port number of that other listening PTCP port
+            to connect to.
+        @type port: C{int}
+
+        @param pseudoPort: Not really implemented.  Do not pass a
+            value for this parameter or things will break.
+
+        @return: A L{PTCPConnection} instance representing the new
+            connection, but you really shouldn't use this for
+            anything.  Write a protocol!
+        """
         sourcePseudoPort = genConnID() % MAX_PSEUDO_PORT
         conn = self._connections[(pseudoPort, sourcePseudoPort, (host, port))
                                  ] = PTCPConnection(
