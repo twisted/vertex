@@ -7,7 +7,7 @@ I{Quotient to Quotient} protocol implementation.
 
 # stdlib
 import itertools
-import md5
+from hashlib import md5
 import struct
 
 from pprint import pformat
@@ -1974,7 +1974,7 @@ class DefaultCertificateStore:
 
 
     def genSerial(self, name):
-        return abs(struct.unpack('!i', md5.md5(name).digest()[:4])[0])
+        return abs(struct.unpack('!i', md5(name).digest()[:4])[0])
 
     def addPrivateCertificate(self, subjectName, existingCertificate=None):
         """
