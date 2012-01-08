@@ -1306,7 +1306,10 @@ class Q2Q(AMP, subproducer.SuperProducer):
             S:
 
         """
-        connection = self.connections[int(box['id'])]
+        id = int(box['id'])
+        if id not in self.connections:
+            raise error.ConnectionDone()
+        connection = self.connections[id]
         data = box['body']
         connection.dataReceived(data)
         return AmpBox()
