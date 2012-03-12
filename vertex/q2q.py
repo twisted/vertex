@@ -1,4 +1,4 @@
-# -*- test-case-name: vertex.test.test_q2q.UDPConnection.testTwoBadWrites -*-
+# -*- test-case-name: vertex.test.test_q2q -*-
 # Copyright 2005-2008 Divmod, Inc.  See LICENSE file for details
 
 """

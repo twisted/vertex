@@ -113,7 +113,6 @@ class DataEater(protocol.Protocol):
         self.count = 0
 
     def dataReceived(self, data):
-        print "GOTTEN"
         if not data:
             raise RuntimeError("Empty string delivered to DataEater")
         self.data.append(data)
@@ -181,7 +180,6 @@ class StreamingDataFeeder(protocol.Protocol):
         self.call = reactor.callLater(self.DELAY, self._keepGoing)
 
     def _keepGoing(self):
-        print "GOING"
         self.call = None
         if self.paused:
             return
