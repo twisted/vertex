@@ -32,7 +32,9 @@ from twisted.cred.error import UnauthorizedLogin
 
 # epsilon
 from epsilon.extime import Time
-from epsilon import juice
+from twisted.protocols.amp import Argument, Boolean, Integer, String, Unicode, ListOf, AmpList
+from twisted.protocols.amp import AmpBox, Command, StartTLS, ProtocolSwitchCommand, AMP
+from twisted.protocols.amp import _objectsToStrings
 from epsilon.structlike import record
 
 # vertex
@@ -186,11 +188,19 @@ class Q2QTransportAddress:
             self.logical,
             self.protocol)
 
-class Q2QAddressArgument(juice.Argument):
+
+class AmpTime(Argument):
+    def toString(self, inObject):
+        return inObject.asISO8601TimeAndDate()
+    def fromString(self, inString):
+        return Time.fromISO8601TimeAndDate(inString)
+
+
+class Q2QAddressArgument(Argument):
     fromString = Q2QAddress.fromString
     toString = Q2QAddress.__str__
 
-class HostPort(juice.Argument):
+class HostPort(Argument):
     def toString(self, inObj):
         return "%s:%d" % tuple(inObj)
 
@@ -200,33 +210,19 @@ class HostPort(juice.Argument):
 
 
 
-class _Base64Wrapped(juice.Base64Binary):
+class _BinaryLoadable(String):
     def toString(self, arg):
         assert isinstance(arg, self.loader), "%r not %r" % (arg, self.loader)
-        return juice.Base64Binary.toString(self, arg.dump())
+        return String.toString(self, arg.dump())
 
     def fromString(self, arg):
-        return self.loader.load(juice.Base64Binary.fromString(self, arg))
+        return self.loader.load(String.fromString(self, arg))
 
-class CertReq(_Base64Wrapped):
+class CertReq(_BinaryLoadable):
     loader = CertificateRequest
 
-class Cert(_Base64Wrapped):
+class Cert(_BinaryLoadable):
     loader = Certificate
-
-class SimpleStringList(juice.Argument):
-    separator = ', '
-    def toString(self, inObj):
-        for inSeg in inObj:
-            assert self.separator not in inSeg, \
-                "%r not allowed to contain elements containing %r" % (inObj, self.separator)
-        return self.separator.join(inObj)
-
-    def fromString(self, inString):
-        if inString == '':
-            return []
-        return inString.split(self.separator)
-
 
 from twisted.internet import protocol
 
@@ -319,9 +315,8 @@ class AbstractConnectionAttempt(protocol.ClientFactory):
         if self.cancelled:
             return ImmediatelyLoseConnection()
         assert self.q2qb is None
-        self.q2qb = Q2QBootstrap(self.issueGreeting,
-                                 self.connectionID,
-                                 self.clientProtocolFactory)
+        self.q2qb = Q2QBootstrap(
+            self.connectionID, self.clientProtocolFactory)
         return self.q2qb
 
     def clientConnectionFailed(self, connector, reason):
@@ -394,8 +389,9 @@ class VirtualConnectionAttempt(AbstractConnectionAttempt):
             proto = innerTransport.startProtocol()
             return self.deferred
 
-        return Virtual(Id=cid).do(self.q2qproto).addCallback(
-            startit)
+        d = self.q2qproto.callRemote(Virtual, id=cid)
+        d.addCallback(startit)
+        return d
 
 
 class VirtualMethod:
@@ -488,13 +484,15 @@ class RPTCPConnectionAttempt(AbstractConnectionAttempt):
             self.deferred.errback(CONNECTION_DONE)
             return self.deferred
 
-        return BindUDP(
+        d = self.q2qproto.callRemote(
+            BindUDP,
             q2qsrc=self.toAddress,
             q2qdst=self.fromAddress,
             protocol=self.protocolName,
             udpsrc=(self.method.host, self.method.port),
-            udpdst=(self.q2qproto._determinePublicIP(), realLocalUDP)
-            ).do(self.q2qproto).addCallbacks(enbinden, swallowKnown)
+            udpdst=(self.q2qproto._determinePublicIP(), realLocalUDP))
+        d.addCallbacks(enbinden, swallowKnown)
+        return d
 
     def cancel(self):
         if not self.cancelled:
@@ -539,50 +537,38 @@ _methodFactories = {'virtual': VirtualMethod,
                     'ptcp': PTCPMethod,
                     'rptcp': RPTCPMethod}
 
-class MethodsList(SimpleStringList):
+class Method(Argument):
     def toString(self, inObj):
-        return super(MethodsList, self).toString([x.toString() for x in inObj])
+        return inObj.toString()
+
 
     def fromString(self, inString):
-        strings = super(MethodsList, self).fromString(inString)
-        accumulator = []
-        accumulate = accumulator.append
-        for string in strings:
-            f = string.split("@",1)
-            factoryName = f[0]
-            if len(f)>1:
-                factoryData = f[1]
-            else:
-                factoryData = ''
-            methodFactory = _methodFactories.get(factoryName, None)
-            if methodFactory is None:
-                factory = UnknownMethod(string)
-            else:
-                factory = methodFactory(factoryData)
-            accumulate(factory)
-        return accumulator
+        f = inString.split("@", 1)
+        factoryName = f[0]
+        if len(f) > 1:
+            factoryData = f[1]
+        else:
+            factoryData = ''
+        methodFactory = _methodFactories.get(factoryName, None)
+        if methodFactory is None:
+            factory = UnknownMethod(inString)
+        else:
+            factory = methodFactory(factoryData)
+        return factory
 
 
-class Secure(juice.Command):
+class Secure(StartTLS):
 
     commandName = "secure"
-    arguments = [
+    arguments = StartTLS.arguments + [
         ('From', Q2QAddressArgument(optional=True)),
         ('to', Q2QAddressArgument()),
-        ('authorize', juice.Boolean())
+        ('authorize', Boolean())
         ]
 
-    def makeResponse(cls, objects, proto):
-        return juice.TLSBox(*objects)
-    makeResponse = classmethod(makeResponse)
-
-    def do(self, proto, namespace=None, requiresAnswer=True):
-        d = juice.Command.do(self, proto, namespace, requiresAnswer)
-        proto.prepareTLS()
-        return d
 
 
-class Listen(juice.Command):
+class Listen(Command):
     """
     A simple command for registering interest with an active Q2Q connection
     to hear from a server when others come calling.  An occurrence of this
@@ -604,35 +590,38 @@ class Listen(juice.Command):
     commandName = 'listen'
     arguments = [
         ('From', Q2QAddressArgument()),
-        ('protocols', SimpleStringList()),
-        ('description', juice.Unicode())]
+        ('protocols', ListOf(String())),
+        ('description', Unicode())]
 
     result = []
 
-class ConnectionStartBox(juice.Box):
+class ConnectionStartBox(AmpBox):
     def __init__(self, __transport):
         super(ConnectionStartBox, self).__init__()
         self.virtualTransport = __transport
 
-    def sendTo(self, proto):
-        super(ConnectionStartBox, self).sendTo(proto)
+    # XXX Overriding a private interface
+    def _sendTo(self, proto):
+        super(ConnectionStartBox, self)._sendTo(proto)
         self.virtualTransport.startProtocol()
 
-class Virtual(juice.Command):
+class Virtual(Command):
     commandName = 'virtual'
     result = []
 
-    arguments = [('id', juice.Integer())]
+    arguments = [('id', Integer())]
 
     def makeResponse(cls, objects, proto):
         tpt = objects.pop('__transport__')
-        return juice.objectsToStrings(objects, cls.response,
-                                      ConnectionStartBox(tpt),
-                                      proto)
+        # XXX Using a private API
+        return _objectsToStrings(
+            objects, cls.response,
+            ConnectionStartBox(tpt),
+            proto)
 
     makeResponse = classmethod(makeResponse)
 
-class Identify(juice.Command):
+class Identify(Command):
     """
     Respond to an IDENTIFY command with a self-signed certificate for the
     domain requested, assuming we are an authority for said domain.  An
@@ -654,7 +643,7 @@ class Identify(juice.Command):
 
     response = [('certificate', Cert())]
 
-class BindUDP(juice.Command):
+class BindUDP(Command):
     """
     See UDPXMethod
     """
@@ -662,7 +651,7 @@ class BindUDP(juice.Command):
     commandName = 'bind-udp'
 
     arguments = [
-        ('protocol', juice.String()),
+        ('protocol', String()),
         ('q2qsrc', Q2QAddressArgument()),
         ('q2qdst', Q2QAddressArgument()),
         ('udpsrc', HostPort()),
@@ -673,7 +662,7 @@ class BindUDP(juice.Command):
 
     response = []
 
-class SourceIP(juice.Command):
+class SourceIP(Command):
     """
     Ask a server on the public internet what my public IP probably is.  An
     occurrence of this command might have this appearance on the wire::
@@ -691,9 +680,9 @@ class SourceIP(juice.Command):
 
     arguments = []
 
-    response = [('ip', juice.String())]
+    response = [('ip', String())]
 
-class Inbound(juice.Command):
+class Inbound(Command):
     """
     Request information about where to connect to a particular resource.
 
@@ -755,20 +744,20 @@ class Inbound(juice.Command):
     commandName = 'inbound'
     arguments = [('From', Q2QAddressArgument()),
                  ('to', Q2QAddressArgument()),
-                 ('protocol', juice.String()),
+                 ('protocol', String()),
                  ('udp_source', HostPort(optional=True))]
 
-    response = [('listeners', juice.JuiceList(
-                [('id', juice.String()),
+    response = [('listeners', AmpList(
+                [('id', String()),
                  ('certificate', Cert(optional=True)),
-                 ('methods', MethodsList()),
-                 ('expires', juice.Time()),
-                 ('description', juice.Unicode())]))]
+                 ('methods', ListOf(Method())),
+                 ('expires', AmpTime()),
+                 ('description', Unicode())]))]
 
     errors = {KeyError: "NotFound"}
     fatalErrors = {VerifyError: "VerifyError"}
 
-class Outbound(juice.Command):
+class Outbound(Command):
     """Similar to Inbound, but _requires that the recipient already has the
     id parameter as an outgoing connection attempt_.
     """
@@ -776,42 +765,39 @@ class Outbound(juice.Command):
 
     arguments = [('From', Q2QAddressArgument()),
                  ('to', Q2QAddressArgument()),
-                 ('protocol', juice.String()),
-                 ('id', juice.String()),
-                 ('methods', MethodsList())]
+                 ('protocol', String()),
+                 ('id', String()),
+                 ('methods', ListOf(Method()))]
 
     response = []
 
     errors = {AttemptsFailed: 'AttemptsFailed'}
 
-class Sign(juice.Command):
+class Sign(Command):
     commandName = 'sign'
     arguments = [('certificate_request', CertReq()),
-                 ('password', juice.Base64Binary())]
+                 ('password', String())]
 
     response = [('certificate', Cert())]
 
     errors = {KeyError: "NoSuchUser",
               BadCertificateRequest: "BadCertificateRequest"}
 
-class Choke(juice.Command):
+class Choke(Command):
     """Ask our peer to be quiet for a while.
     """
     commandName = 'Choke'
-    arguments = [('id', juice.Integer())]
+    arguments = [('id', Integer())]
+    requiresAnswer = False
 
 
-class Unchoke(juice.Command):
+class Unchoke(Command):
     """Reverse the effects of a choke.
     """
     commandName = 'Unchoke'
-    arguments = [('id', juice.Integer())]
+    arguments = [('id', Integer())]
+    requiresAnswer = False
 
-def textEncode(S):
-    return S.encode('base64').replace('\n', '')
-
-def textDecode(S):
-    return S.decode('base64')
 
 def safely(f, *a, **k):
     """try/except around something, w/ twisted error handling.
@@ -821,7 +807,7 @@ def safely(f, *a, **k):
     except:
         log.err()
 
-class Q2Q(juice.Juice, subproducer.SuperProducer):
+class Q2Q(AMP, subproducer.SuperProducer):
     """ Quotient to Quotient protocol.
 
     At a low level, this uses a protocol called 'Juice' (JUice Is Concurrent
@@ -850,10 +836,9 @@ class Q2Q(juice.Juice, subproducer.SuperProducer):
         L{Q2QService.connectQ2Q} and L{Q2QService.listenQ2Q}.
         """
         subproducer.SuperProducer.__init__(self)
-        juice.Juice.__init__(self, *a, **kw)
+        AMP.__init__(self, *a, **kw)
 
     def connectionMade(self):
-        ""
         self.producingTransports = {}
         self.connections = {}
         self.listeningClient = []
@@ -868,13 +853,13 @@ class Q2Q(juice.Juice, subproducer.SuperProducer):
                 self.publicIP = ip
                 self.service.publicIP = ip
                 self.service._publicIPIsReallyPrivate = False
-            SourceIP().do(self).addCallback(rememberPublicIP)
+            self.callRemote(SourceIP).addCallback(rememberPublicIP)
         else:
             log.msg("Using existing public IP: %r" % (self.service.publicIP,))
 
     def connectionLost(self, reason):
         ""
-        juice.Juice.connectionLost(self, reason)
+        AMP.connectionLost(self, reason)
         self._uncacheMe()
         self.producingTransports = {}
         for key, value in self.listeningClient:
@@ -890,7 +875,7 @@ class Q2Q(juice.Juice, subproducer.SuperProducer):
         ""
         self.connectionObservers.append(observer)
 
-    def command_BIND_UDP(self, q2qsrc, q2qdst, udpsrc, udpdst, protocol):
+    def _bindUDP(self, q2qsrc, q2qdst, udpsrc, udpdst, protocol):
 
         # we are representing the src, because they are the ones being told to
         # originate a UDP packet.
@@ -912,11 +897,13 @@ class Q2Q(juice.Juice, subproducer.SuperProducer):
             if listener.transport.getPeer().host == srchost:
                 # print 'bound in clients loop'
 
-                d = BindUDP(q2qsrc=q2qsrc,
-                            q2qdst=q2qdst,
-                            udpsrc=udpsrc,
-                            udpdst=udpdst,
-                            protocol=protocol).do(listener)
+                d = listener.callRemote(
+                    BindUDP,
+                    q2qsrc=q2qsrc,
+                    q2qdst=q2qdst,
+                    udpsrc=udpsrc,
+                    udpdst=udpdst,
+                    protocol=protocol)
                 def swallowKnown(err):
                     err.trap(error.ConnectionDone, error.ConnectionLost)
                 d.addErrback(swallowKnown)
@@ -936,16 +923,16 @@ class Q2Q(juice.Juice, subproducer.SuperProducer):
         # print 'conn-error'
         raise ConnectionError("unable to find appropriate UDP binder")
 
-    command_BIND_UDP.command = BindUDP
+    BindUDP.responder(_bindUDP)
 
-    def command_IDENTIFY(self, subject):
+    def _identify(self, subject):
         """
         Implementation of L{Identify}.
         """
         ourCA = self.service.certificateStorage.getPrivateCertificate(str(subject))
-        return dict(Certificate=ourCA)
+        return dict(certificate=ourCA)
+    Identify.responder(_identify)
 
-    command_IDENTIFY.command = Identify
 
     def verifyCertificateAllowed(self,
                                  ourAddress,
@@ -1097,7 +1084,7 @@ class Q2Q(juice.Juice, subproducer.SuperProducer):
             (ourCert, peerCert,
              ourAddress, theirAddress))
 
-    def command_LISTEN(self, protocols, From, description):
+    def _listen(self, protocols, From, description):
         """
         Implementation of L{Listen}.
         """
@@ -1118,10 +1105,10 @@ class Q2Q(juice.Juice, subproducer.SuperProducer):
             self.listeningClient.append((key, value))
             self.service.listeningClients.setdefault(key, []).append(value)
         return {}
+    Listen.responder(_listen)
 
-    command_LISTEN.command = Listen
 
-    def command_INBOUND(self, From, to, protocol, udp_source=None):
+    def _inbound(self, From, to, protocol, udp_source=None):
         """
         Implementation of L{Inbound}.
         """
@@ -1135,6 +1122,7 @@ class Q2Q(juice.Juice, subproducer.SuperProducer):
                                                      protocol,
                                                      udp_source).addErrback(
             lambda f: f.trap(KeyError) and dict(listeners=[]))
+    Inbound.responder(_inbound)
 
     def _inboundimpl(self, ign, From, to, protocol, udp_source):
 
@@ -1215,15 +1203,15 @@ class Q2Q(juice.Juice, subproducer.SuperProducer):
         key = (to, protocol)
         if key in self.service.listeningClients:
             args = dict(From=From,
-                        To=to,
-                        Protocol=protocol,
-                        UDP_Source=udp_source)
+                        to=to,
+                        protocol=protocol,
+                        udp_source=udp_source)
             DL = []
             lclients = self.service.listeningClients[key]
             log.msg("listeners found for %s:%r" % (to, protocol))
             for listener, listenCert, desc in lclients:
                 log.msg("relaying inbound to %r via %r" % (to, listener))
-                DL.append(Inbound(**args).do(listener).addCallback(
+                DL.append(listener.callRemote(Inbound, **args).addCallback(
                     self._massageClientInboundResponse, listener, result))
 
             def allListenerResponses(x):
@@ -1234,7 +1222,6 @@ class Q2Q(juice.Juice, subproducer.SuperProducer):
             log.msg("no listenening clients for %s:%r. local methods: %r" % (to,protocol, result))
             return dict(listeners=result)
 
-    command_INBOUND.command = Inbound
 
     def _massageClientInboundResponse(self, inboundResponse, listener, result):
         irl = inboundResponse['listeners']
@@ -1271,11 +1258,10 @@ class Q2Q(juice.Juice, subproducer.SuperProducer):
     def _determinePrivateIP(self):
         return self.transport.getHost().host
 
-    def command_SOURCE_IP(self):
+    def _sourceIP(self):
         result = {'ip': self.transport.getPeer().host}
         return result
-
-    command_SOURCE_IP.command = SourceIP
+    SourceIP.responder(_sourceIP)
 
     def _resume(self, connection, data, writeDeferred):
         try:
@@ -1283,22 +1269,24 @@ class Q2Q(juice.Juice, subproducer.SuperProducer):
         except:
             writeDeferred.errback()
         else:
-            writeDeferred.callback(juice.Box())
+            writeDeferred.callback({})
 
 
-    def command_CHOKE(self, id):
+    def _choke(self, id):
         connection = self.connections[id]
         connection.choke()
         return {}
-    command_CHOKE.command = Choke
+    Choke.responder(_choke)
 
-    def command_UNCHOKE(self, id):
+
+    def _unchoke(self, id):
         connection = self.connections[id]
         connection.unchoke()
         return {}
-    command_UNCHOKE.command = Unchoke
+    Unchoke.responder(_unchoke)
 
-    def juice_WRITE(self, box):
+
+    def amp_WRITE(self, box):
         """
         Respond to a WRITE command, sending some data over a virtual channel
         created by VIRTUAL.  The answer is simply an acknowledgement, as it is
@@ -1318,12 +1306,15 @@ class Q2Q(juice.Juice, subproducer.SuperProducer):
             S:
 
         """
-        connection = self.connections[int(box['id'])]
-        data = box[juice.BODY]
+        id = int(box['id'])
+        if id not in self.connections:
+            raise error.ConnectionDone()
+        connection = self.connections[id]
+        data = box['body']
         connection.dataReceived(data)
-        return juice.Box()
+        return AmpBox()
 
-    def juice_CLOSE(self, box):
+    def amp_CLOSE(self, box):
         """
         Respond to a CLOSE command, dumping some data onto the stream.  As with
         WRITE, this returns an empty acknowledgement.
@@ -1339,10 +1330,13 @@ class Q2Q(juice.Juice, subproducer.SuperProducer):
             S:
 
         """
-        self.connections[int(box['id'])].connectionLost(CONNECTION_DONE)
-        return juice.Box()
+        # The connection is removed from the mapping by connectionLost.
+        connection = self.connections[int(box['id'])]
+        connection.connectionLost(Failure(CONNECTION_DONE))
+        return AmpBox()
 
-    def command_SIGN(self, certificate_request, password):
+
+    def _sign(self, certificate_request, password):
         """
         Respond to a request to sign a CSR for a user or agent located within
         our domain.
@@ -1378,12 +1372,10 @@ class Q2Q(juice.Juice, subproducer.SuperProducer):
                     certificate_request, ourCert, ser))
 
         return D.addCallback(_)
+    Sign.responder(_sign)
 
 
-    command_SIGN.command = Sign
-
-
-    def command_SECURE(self, to, From, authorize):
+    def _secure(self, to, From, authorize):
         """
         Response to a SECURE command, starting TLS when necessary, and using a
         certificate identified by the I{To} header.
@@ -1411,12 +1403,13 @@ class Q2Q(juice.Juice, subproducer.SuperProducer):
             D = CS.getSelfSignedCertificate(str(From.domainAddress()))
         else:
             self.authorized = False
-            return [ourCert]
+            return {'tls_localCertificate': ourCert}
 
         def hadCert(peerSigned):
             self.authorized = True
             self._cacheMeNow(From, to, authorize)
-            return [ourCert, peerSigned]
+            return {'tls_localCertificate': ourCert,
+                    'tls_verifyAuthorities': [peerSigned]}
 
         def didNotHaveCert(err):
             err.trap(KeyError)
@@ -1426,8 +1419,7 @@ class Q2Q(juice.Juice, subproducer.SuperProducer):
         D.addCallback(hadCert)
 
         return D
-
-    command_SECURE.command = Secure
+    Secure.responder(_secure)
 
     _cachedUnrequested = False
 
@@ -1462,14 +1454,14 @@ class Q2Q(juice.Juice, subproducer.SuperProducer):
         """
         CS = self.service.certificateStorage
         host = str(From.domainAddress())
-        p = juice.Juice(False)
+        p = AMP()
         p.wrapper = self.wrapper
         f = protocol.ClientCreator(reactor, lambda: p)
         connD = f.connectTCP(host, port)
 
         def connected(proto):
             dhost = From.domainAddress()
-            iddom = Identify(subject=dhost).do(proto)
+            iddom = proto.callRemote(Identify, subject=dhost)
             def gotCert(identifyBox):
                 theirCert = identifyBox['certificate']
                 theirIssuer = theirCert.getIssuer().commonName
@@ -1505,19 +1497,20 @@ class Q2Q(juice.Juice, subproducer.SuperProducer):
             raise RuntimeError("Re-securing already secured connection.")
 
         def _cbSecure(response):
-            if foreignCertificateAuthority is None:
-                # *Don't* verify the certificate in this case.
-                self.startTLS(fromCertificate)
-                self.authorized = False
-            else:
-                self.startTLS(fromCertificate, foreignCertificateAuthority)
+            if foreignCertificateAuthority is not None:
                 self.authorized = True
             return True
-        return Secure(From=fromAddress,
-                      To=toAddress,
-                      Authorize=authorize).do(self).addCallback(_cbSecure)
+        extra = {'tls_localCertificate': fromCertificate}
+        if foreignCertificateAuthority is not None:
+            extra['tls_verifyAuthorities'] = [foreignCertificateAuthority]
 
-    def command_VIRTUAL(self, id):
+        return self.callRemote(
+            Secure,
+            From=fromAddress,
+            to=toAddress,
+            authorize=authorize, **extra).addCallback(_cbSecure)
+
+    def _virtual(self, id):
         if self.isServer:
             assert id > 0
         else:
@@ -1529,7 +1522,7 @@ class Q2Q(juice.Juice, subproducer.SuperProducer):
 
         return dict(__transport__=tpt)
 
-    command_VIRTUAL.command = Virtual
+    Virtual.responder(_virtual)
 
 
     # Client/Support methods.
@@ -1575,10 +1568,12 @@ class Q2Q(juice.Juice, subproducer.SuperProducer):
         d.addCallback(gotResults)
         return d
 
+
     def listen(self, fromAddress, protocols, serverDescription):
-        return Listen(From=fromAddress,
-                      Protocols=protocols,
-                      Description=serverDescription).do(self)
+        return self.callRemote(
+            Listen, From=fromAddress,
+            protocols=protocols, description=serverDescription)
+
 
     def connect(self, From, to,
                 protocolName, clientFactory,
@@ -1599,8 +1594,8 @@ class Q2Q(juice.Juice, subproducer.SuperProducer):
         publicIP = self._determinePublicIP()
 
         A = dict(From=From,
-                 To=to,
-                 Protocol=protocolName)
+                 to=to,
+                 protocol=protocolName)
 
         if self.service.dispatcher is not None:
             # tell them exactly where they can shove it
@@ -1610,7 +1605,7 @@ class Q2Q(juice.Juice, subproducer.SuperProducer):
             # don't tell them because we don't know
             log.msg("dispatcher unavailable when connecting")
 
-        D = Inbound(**A).do(self)
+        D = self.callRemote(Inbound, **A)
 
         def _connected(answer):
             listenersD = defer.maybeDeferred(chooser, answer['listeners'])
@@ -1726,25 +1721,25 @@ class SeparateConnectionTransport(object):
             self.subProtocol.connectionLost(reason)
             self.subProtocol = None
 
-class WhoAmI(juice.Command):
+class WhoAmI(Command):
     commandName = 'Who-Am-I'
 
     response = [
         ('address', HostPort()),
         ]
 
-class RetrieveConnection(juice.ProtocolSwitchCommand):
+class RetrieveConnection(ProtocolSwitchCommand):
     commandName = 'Retrieve-Connection'
 
     arguments = [
-        ('identifier', juice.String()),
+        ('identifier', String()),
         ]
 
     fatalErrors = {KeyError: "NoSuchConnection"}
 
-class Q2QBootstrap(juice.Juice):
-    def __init__(self, issueGreeting, connIdentifier=None, protoFactory=None):
-        juice.Juice.__init__(self, issueGreeting)
+class Q2QBootstrap(AMP):
+    def __init__(self, connIdentifier=None, protoFactory=None):
+        AMP.__init__(self)
         assert connIdentifier is None or isinstance(connIdentifier, (str))
         self.connIdentifier = connIdentifier
         self.protoFactory = protoFactory
@@ -1761,22 +1756,22 @@ class Q2QBootstrap(juice.Juice):
         """
         def cbWhoAmI(result):
             return result['address']
-        return WhoAmI().do(self).addCallback(cbWhoAmI)
+        return self.callRemote(WhoAmI).addCallback(cbWhoAmI)
 
 
-    def command_WHO_AM_I(self):
+    def _whoami(self):
         peer = self.transport.getPeer()
         return {
             'address': (peer.host, peer.port),
             }
-    command_WHO_AM_I.command = WhoAmI
+    WhoAmI.responder(_whoami)
 
 
     def retrieveConnection(self, identifier, factory):
-        return RetrieveConnection(factory, identifier=identifier).do(self)
+        return self.callRemote(RetrieveConnection, factory, identifier=identifier)
 
 
-    def command_RETRIEVE_CONNECTION(self, identifier):
+    def _retrieveConnection(self, identifier):
         listenerInfo = self.service.lookupListener(identifier)
         if listenerInfo is None:
             raise KeyError(identifier)
@@ -1789,14 +1784,18 @@ class Q2QBootstrap(juice.Juice):
                     listenerInfo.From,
                     listenerInfo.protocolName)
 
-    command_RETRIEVE_CONNECTION.command = RetrieveConnection
+    RetrieveConnection.responder(_retrieveConnection)
+
+
 
 class Q2QBootstrapFactory(protocol.Factory):
+    protocol = Q2QBootstrap
+
     def __init__(self, service):
         self.service = service
 
     def buildProtocol(self, addr):
-        q2etc = Q2QBootstrap(False)
+        q2etc = protocol.Factory.buildProtocol(self, addr)
         q2etc.service = self.service
         return q2etc
 
@@ -1835,10 +1834,10 @@ class VirtualTransport(subproducer.SubProducer):
         return self.protocol
 
     def pauseProducing(self):
-        Choke(id=self.id).do(self.q2q, requiresAnswer=False)
+        self.q2q.callRemote(Choke, id=self.id)
 
     def resumeProducing(self):
-        Unchoke(id=self.id).do(self.q2q, requiresAnswer=False)
+        self.q2q.callRemote(Unchoke, id=self.id)
 
     def writeSequence(self, iovec):
         self.write(''.join(iovec))
@@ -1848,9 +1847,21 @@ class VirtualTransport(subproducer.SubProducer):
             # print 'omg wtf loseConnection!???!'
             return
         self.disconnecting = True
-        self.q2q.sendCommand('close', id=str(self.id)).addCallbacks(
-            lambda ign: self.connectionLost(CONNECTION_DONE),
-            self.connectionLost)
+        d = self.q2q.callRemoteString('close', id=str(self.id))
+        def cbClosed(ignored):
+            self.connectionLost(Failure(CONNECTION_DONE))
+        def ebClosed(reason):
+            if self.id in self.q2q.connections:
+                self.connectionLost(reason)
+            elif not reason.check(error.ConnectionDone):
+                # Anything but a ConnectionDone (or similar things, perhaps)
+                # is fishy.  Like an IndexError, that'd be wacko.  But a
+                # ConnectionDone when self.id is already out of the Q2Q's
+                # connections mapping means the connection was closed after
+                # we thought it was supposed to be closed.  No harm there.
+                log.err(reason, "Close virtual #%d failed" % (self.id,))
+        d.addCallbacks(cbClosed, ebClosed)
+
 
     def connectionLost(self, reason):
         del self.q2q.connections[self.id]
@@ -1858,6 +1869,7 @@ class VirtualTransport(subproducer.SubProducer):
             self.protocol.connectionLost(reason)
         if self.isClient:
             self.protocolFactory.clientConnectionLost(None, reason)
+
 
     def dataReceived(self, data):
         try:
@@ -1874,8 +1886,8 @@ class VirtualTransport(subproducer.SubProducer):
             self.connectionLost(reason)
 
     def write(self, data):
-        self.q2q.sendCommand('write', data, False,
-                             id=str(self.id))
+        self.q2q.callRemoteString(
+            'write', False, body=data, id=str(self.id))
 
     def getHost(self):
         return VirtualTransportAddress(self.q2q.transport.getHost())
@@ -2054,11 +2066,11 @@ class DirectoryCertificateStore(DefaultCertificateStore):
         self.localStore = _pemmap(os.path.join(filepath, 'private'),
                                   PrivateCertificate)
 
-class MessageSender(juice.Juice):
+class MessageSender(AMP):
     """
     """
 
-theMessageFactory = juice.JuiceClientFactory()
+theMessageFactory = protocol.ClientFactory()
 theMessageFactory.protocol = MessageSender
 
 class _MessageChannel(object):
@@ -2085,30 +2097,37 @@ _ConnectionWaiter = record('From to protocolName protocolFactory isClient')
 
 class Q2QClientFactory(protocol.ClientFactory):
 
+    protocol = Q2Q
+
     def __init__(self, service):
         self.service = service
 
     def buildProtocol(self, addr):
-        p = Q2Q(False)
+        p = protocol.ClientFactory.buildProtocol(self, addr)
+        p.isServer = False
         p.service = self.service
         p.factory = self
         p.wrapper = self.service.wrapper
         return p
 
 
-class YourAddress(juice.Command):
+class YourAddress(Command):
     arguments = [
         ('address', HostPort()),
         ]
 
 
+
 class AddressDiscoveryProtocol(Q2QBootstrap):
     def __init__(self, addrDiscDef):
-        Q2QBootstrap.__init__(self, False)
+        Q2QBootstrap.__init__(self)
         self.addrDiscDef = addrDiscDef
+
 
     def connectionMade(self):
         self.whoami().chainDeferred(self.addrDiscDef)
+
+
 
 class _AddressDiscoveryFactory(protocol.ClientFactory):
     def __init__(self, addressDiscoveredDeferred):
@@ -2149,10 +2168,10 @@ class PTCPConnectionDispatcher(object):
         p.write('NAT!', (host, port))
         return sourcePort
 
-    def bindNewPort(self, portNum=0):
+    def bindNewPort(self, portNum=0, iface=''):
         iPortNum = portNum
         proto = ptcp.PTCP(self.factory)
-        p = reactor.listenUDP(portNum, proto)
+        p = reactor.listenUDP(portNum, proto, interface=iface)
         portNum = p.getHost().port
         log.msg("Binding PTCP/UDP %d=%d" % (iPortNum,portNum))
         self._ports[portNum] = (p, proto)
@@ -2193,11 +2212,14 @@ class Q2QService(service.MultiService, protocol.ServerFactory):
 
     debugName = 'service'
 
+    protocol = Q2Q
+
     def __repr__(self):
         return '<Q2QService %r@%x>' % (self.debugName, id(self))
 
     def buildProtocol(self, addr):
-        p = Q2Q(True)
+        p = protocol.ServerFactory.buildProtocol(self, addr)
+        p.isServer = True
         p.service = self
         p.factory = self
         p.wrapper = self.wrapper
@@ -2376,8 +2398,10 @@ class Q2QService(service.MultiService, protocol.ServerFactory):
         apc = self.certificateStorage.addPrivateCertificate
 
         def _2(secured):
-            D = Sign(certificate_request=reqobj,
-                     password=sharedSecret).do(secured)
+            D = secured.callRemote(
+                Sign,
+                certificate_request=reqobj,
+                password=sharedSecret)
             def _1(dcert):
                 cert = dcert['certificate']
                 privcert = certpair(cert, kp)
@@ -2464,11 +2488,10 @@ class Q2QService(service.MultiService, protocol.ServerFactory):
             self.dispatcher = PTCPConnectionDispatcher(self._bootstrapFactory)
 
         if self.q2qPortnum is not None:
-            self.q2qPort = reactor.listenTCP(
-                self.q2qPortnum, self)
+            self.q2qPort = reactor.listenTCP(self.q2qPortnum, self)
             self.q2qPortnum = self.q2qPort.getHost().port
             if self.dispatcher is not None:
-                self.sharedUDPPortnum = self.dispatcher.bindNewPort(self.q2qPortnum)
+                self.sharedUDPPortnum = self.dispatcher.bindNewPort(self.q2qPortnum, iface=self.publicIP or '')
 
         if self.inboundTCPPortnum is not None:
             self.inboundTCPPort = reactor.listenTCP(
@@ -2701,7 +2724,7 @@ class Q2QService(service.MultiService, protocol.ServerFactory):
                     str(toDomain))
                 def nocert(failure):
                     failure.trap(KeyError)
-                    identD = Identify(subject=toDomain).do(proto).addCallback(
+                    identD = proto.callRemote(Identify, subject=toDomain).addCallback(
                         lambda x: x['certificate'])
                     def storeit(certificate):
                         return self.certificateStorage.storeSelfSignedCertificate(

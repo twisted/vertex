@@ -15,7 +15,7 @@ from twisted.internet import protocol
 
 from twisted.python.filepath import FilePath
 
-from epsilon import juice
+from twisted.protocols.amp import Integer, String, Command, AMP
 
 from vertex import q2q
 from vertex import bits
@@ -31,7 +31,7 @@ PROTOCOL_NAME = 'sigma'
 class VerifyError(Exception):
     pass
 
-class BitArrayArgument(juice.String):
+class BitArrayArgument(String):
     def toString(self, arr):
         return str(arr.size) + ':' + arr.bytes.tostring()
 
@@ -41,35 +41,39 @@ class BitArrayArgument(juice.String):
         b.fromstring(bytes)
         return bits.BitArray(b, int(size))
 
-class Put(juice.Command):
+class Put(Command):
     """
     Tells the remote end it should request a file from me.
     """
 
-    arguments = [("name", juice.String())]
+    arguments = [("name", String())]
 
 
-class Get(juice.Command):
+class Get(Command):
     """
     Tells the remote it should start sending me chunks of a file.
     """
 
-    arguments = [("name", juice.String()),
+    arguments = [("name", String()),
                  ('mask', BitArrayArgument(optional=True))]
 
-    response = [("size", juice.Integer())] # number of octets!!
+    response = [("size", Integer())] # number of octets!!
 
 
-class Data(juice.Command):
+
+class Data(Command):
     """
     Sends some data for a transfer.
     """
+    requiresAnswer = False
 
-    arguments = [('name', juice.String()),
-                 ('chunk', juice.Integer()),
-                 (juice.BODY, juice.String())]
+    arguments = [('name', String()),
+                 ('chunk', Integer()),
+                 ('body', String())]
 
-class Introduce(juice.Command):
+
+
+class Introduce(Command):
     """
     Tells the remote end about another node which should have information about
     this transfer.
@@ -77,11 +81,13 @@ class Introduce(juice.Command):
     Peer: the address of the peer
     Name: the name of the file given.
     """
-
+    requiresAnswer = False
     arguments = [('peer', q2q.Q2QAddressArgument()),
-                 ('name', juice.String())]
+                 ('name', String())]
 
-class Verify(juice.Command):
+
+
+class Verify(Command):
     """
     Verify that the checksum of the given chunk is correct.
 
@@ -91,10 +97,10 @@ class Verify(juice.Command):
       - host hasn't computed checksum for that chunk yet.
     """
 
-    arguments = [('name', juice.String()),
+    arguments = [('name', String()),
                  ('peer', q2q.Q2QAddressArgument()),
-                 ('chunk', juice.Integer()),
-                 ('sha1sum', juice.String())]
+                 ('chunk', Integer()),
+                 ('sha1sum', String())]
 
 
 
@@ -108,17 +114,18 @@ def countChunks(bytes):
     div += bool(mod)
     return div
 
-class SigmaProtocol(juice.Juice):
+class SigmaProtocol(AMP):
     """I am a connection to a peer who has some resources I want in the
     file-swarming network.
     """
 
-    def __init__(self, issueGreeting, nexus):
-        juice.Juice.__init__(self, issueGreeting)
+    def __init__(self, nexus):
+        AMP.__init__(self)
         self.nexus = nexus
         self.sentTransloads = []
 
-    def command_GET(self, name, mask=None):
+
+    def _get(self, name, mask=None):
         peer = self.transport.getQ2QPeer()
         tl = self.nexus.transloads[name]
         size = tl.getSize()
@@ -132,31 +139,31 @@ class SigmaProtocol(juice.Juice):
             # send a reciprocal GET
             self.get(name, tl.mask)
         return dict(size=size)
+    Get.responder(_get)
 
-    command_GET.command = Get
 
-    def command_DATA(self, name, chunk, body):
+    def _data(self, name, chunk, body):
         self.nexus.transloads[name].chunkReceived(
             self.transport.getQ2QPeer(), chunk, body)
         return DONE
+    Data.responder(_data)
 
-    command_DATA.command = Data
 
-    def command_PUT(self, name):
+    def _put(self, name):
         peer = self.transport.getQ2QPeer()
         incompleteFilePath, fullFilePath = self.nexus.ui.allocateFile(
             name, peer)
         self.nexus.pull(incompleteFilePath, fullFilePath, name, peer)
         return DONE
+    Put.responder(_put)
 
-    command_PUT.command = Put
 
-    def command_VERIFY(self, peer, name, chunk, sha1sum):
+    def _verify(self, peer, name, chunk, sha1sum):
         if self.nexus.transloads[name].verifyLocalChunk(peer, chunk, sha1sum):
             return dict()
         raise RuntimeError("checksum incorrect")
+    Verify.responder(_verify)
 
-    command_VERIFY.command = Verify
 
     def data(self, name, chunk, body):
         """
@@ -166,16 +173,15 @@ class SigmaProtocol(juice.Juice):
 
         Sends a chunk of data to a peer.
         """
-        Data(name=name,
-             chunk=chunk,
-             body=body).do(self,
-                           requiresAnswer=False)
+        self.callRemote(Data, name=name, chunk=chunk, body=body)
+
 
     def introduce(self, name, peerToIntroduce):
-        Introduce(peer=peerToIntroduce,
-                  name=name).do(self, requiresAnswer=False)
+        self.callRemote(
+            Introduce, peer=peerToIntroduce, name=name)
 
-    def command_INTRODUCE(self, peer, name):
+
+    def _introduce(self, peer, name):
         # Like a PUT, really, but assuming the transload is already
         # established.
 
@@ -192,8 +198,8 @@ class SigmaProtocol(juice.Juice):
         self.nexus.connectPeer(peer).addCallback(
             lambda peerProto: peerProto.get(name, t.mask))
         return {}
+    Introduce.responder(_introduce)
 
-    command_INTRODUCE.command = Introduce
 
     def get(self, name, mask=None):
         """
@@ -211,13 +217,13 @@ class SigmaProtocol(juice.Juice):
             peerk = PeerKnowledge(bits.BitArray(size=len(tl.mask), default=1))
             peerz[mypeer] = peerk
         peerk.sentGet = True
-        return Get(name=name, mask=mask).do(self).addCallback(lambda r: r['size'])
+        return self.callRemote(
+            Get, name=name, mask=mask).addCallback(lambda r: r['size'])
+
 
     def verify(self, name, peer, chunkNumber, sha1sum):
-        return Verify(name=name,
-                      peer=peer,
-                      chunk=chunkNumber,
-                      sha1sum=sha1sum).do(self)
+        return self.callRemote(
+            Verify, name=name, peer=peer, chunk=chunkNumber, sha1sum=sha1sum)
 
 
     def connectionMade(self):
@@ -548,7 +554,7 @@ class Transload:
 
     def putToPeers(self, peers):
         def eachPeer(proto):
-            Put(name=self.name).do(proto)
+            proto.callRemote(Put, name=self.name)
             return proto
 
         for peer in peers:
@@ -592,13 +598,13 @@ class SigmaServerFactory(protocol.ServerFactory):
     def __init__(self, nexus):
         self.nexus = nexus
     def buildProtocol(self, addr):
-        return SigmaProtocol(True, self.nexus)
+        return SigmaProtocol(self.nexus)
 
 class SigmaClientFactory(protocol.ClientFactory):
     def __init__(self, nexus):
         self.nexus = nexus
     def buildProtocol(self, addr):
-        return SigmaProtocol(True, self.nexus)
+        return SigmaProtocol(self.nexus)
 
 class BaseTransloadUI:
 
