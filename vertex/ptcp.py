@@ -7,9 +7,8 @@ from binascii import crc32  # used to use zlib.crc32 - but that gives different
 
 import itertools
 
-from epsilon.pending import PendingEvent
-
 from twisted.python.failure import Failure
+from twisted.internet.defer import Deferred
 from twisted.internet import protocol, error, reactor, defer
 from twisted.internet.main import CONNECTION_DONE
 from twisted.python import log, util
@@ -831,6 +830,36 @@ class PTCPAddress(object):
             self.pseudoHostPort,
             self.pseudoPeerPort)
 
+
+
+class _PendingEvent(object):
+    def __init__(self):
+        self.listeners = []
+
+
+    def deferred(self):
+        d = Deferred()
+        self.listeners.append(d)
+        return d
+
+
+    def callback(self, result):
+        l = self.listeners
+        self.listeners = []
+        for d in l:
+            d.callback(result)
+
+
+    def errback(self, result=None):
+        if result is None:
+            result = Failure()
+        l = self.listeners
+        self.listeners = []
+        for d in l:
+            d.errback(result)
+
+
+
 class PTCP(protocol.DatagramProtocol):
     """
     L{PTCP} implements a strongly TCP-like protocol on top of UDP.  It
@@ -863,7 +892,7 @@ class PTCP(protocol.DatagramProtocol):
 
     def __init__(self, factory):
         self.factory = factory
-        self._allConnectionsClosed = PendingEvent()
+        self._allConnectionsClosed = _PendingEvent()
 
 
     def connect(self, factory, host, port, pseudoPort=1):

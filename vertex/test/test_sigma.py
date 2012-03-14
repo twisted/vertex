@@ -9,17 +9,17 @@ from twisted.python.filepath import FilePath
 
 from twisted.trial import unittest
 
-from epsilon.test.iosim import IOPump
+from twisted.test.iosim import connectedServerAndClient, FakeTransport
 
 from vertex.q2q import Q2QAddress
 from vertex import sigma
 
 from vertex.test.mock_data import data as TEST_DATA
 
-class FakeQ2QTransport(FileWrapper):
+class FakeQ2QTransport(FakeTransport):
 
-    def __init__(self, stringio, q2qhost, q2qpeer):
-        FileWrapper.__init__(self, stringio)
+    def __init__(self, q2qhost, q2qpeer):
+        FakeTransport.__init__(self)
         self.q2qhost = q2qhost
         self.q2qpeer = q2qpeer
 
@@ -99,18 +99,23 @@ class FakeQ2QService:
             protocolFactory.clientConnectionFailed(None, reason)
             return defer.fail(reason)
         else:
-            cio = StringIO()
-            sio = StringIO()
+            def makeFakeClient(c):
+                ft = FakeQ2QTransport(fromAddress, toAddress)
+                ft.isServer = False
+                ft.protocol = c
+                return ft
 
-            server = listener.buildProtocol(fromAddress)
-            client = protocolFactory.buildProtocol(toAddress)
+            def makeFakeServer(s):
+                ft = FakeQ2QTransport(toAddress, fromAddress)
+                ft.isServer = True
+                ft.protocol = s
+                return ft
 
-            servertpt = FakeQ2QTransport(sio, toAddress, fromAddress)
-            clienttpt = FakeQ2QTransport(cio, fromAddress, toAddress)
-
-            server.makeConnection(servertpt)
-            client.makeConnection(clienttpt)
-            pump = IOPump(client, server, cio, sio, False)
+            client, server, pump = connectedServerAndClient(
+                lambda: listener.buildProtocol(fromAddress),
+                lambda: protocolFactory.buildProtocol(toAddress),
+                makeFakeClient,
+                makeFakeServer)
             self.pumps.append(pump)
 
             return defer.succeed(client)
