@@ -9,6 +9,9 @@ I{Quotient to Quotient} protocol implementation.
 import itertools
 from hashlib import md5
 import struct
+import datetime
+import time
+from collections import namedtuple
 
 from pprint import pformat
 
@@ -30,12 +33,9 @@ from twisted.cred.portal import IRealm, Portal
 from twisted.cred.credentials import IUsernamePassword, UsernamePassword
 from twisted.cred.error import UnauthorizedLogin
 
-# epsilon
-from epsilon.extime import Time
 from twisted.protocols.amp import Argument, Boolean, Integer, String, Unicode, ListOf, AmpList
 from twisted.protocols.amp import AmpBox, Command, StartTLS, ProtocolSwitchCommand, AMP
 from twisted.protocols.amp import _objectsToStrings
-from epsilon.structlike import record
 
 # vertex
 from vertex import subproducer, ptcp
@@ -191,9 +191,12 @@ class Q2QTransportAddress:
 
 class AmpTime(Argument):
     def toString(self, inObject):
-        return inObject.asISO8601TimeAndDate()
+        return inObject.strftime("%Y-%m-%dT%H:%M:%S")
+
+
     def fromString(self, inString):
-        return Time.fromISO8601TimeAndDate(inString)
+        return datetime.datetime.strptime(inString, "%Y-%m-%dT%H:%M:%S")
+
 
 
 class Q2QAddressArgument(Argument):
@@ -2093,7 +2096,10 @@ class _MessageChannel(object):
             self.toAddress,
             self.namespace, command)
 
-_ConnectionWaiter = record('From to protocolName protocolFactory isClient')
+_ConnectionWaiter = namedtuple('_ConnectionWaiter',
+                               'From to protocolName protocolFactory isClient')
+
+
 
 class Q2QClientFactory(protocol.ClientFactory):
 
@@ -2434,7 +2440,7 @@ class Q2QService(service.MultiService, protocol.ServerFactory):
         call = reactor.callLater(120,
                                  self.unmapListener,
                                  listenerID)
-        expires = Time.fromPOSIXTimestamp(call.getTime())
+        expires = datetime.datetime(*time.localtime(call.getTime())[:7])
         self.inboundConnections[listenerID] = (
             _ConnectionWaiter(From, to, protocolName, protocolFactory, isClient),
             call)

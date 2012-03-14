@@ -53,7 +53,7 @@ class IFileTransfer(Interface):
             {'name': str,
              'size': int,
              'type': vertex.filexfer.MIMEType,
-             'modified': epsilon.extime.Time}
+             'modified': datetime.datetime}
         """
 
 class ISessionTokenStorage(Interface):
