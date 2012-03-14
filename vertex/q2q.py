@@ -42,8 +42,6 @@ from vertex import subproducer, ptcp
 from vertex import endpoint, ivertex
 from vertex.conncache import ConnectionCache
 
-from vertex._unfortunate_defer_hack import DeferredList as FOOCBDeferredList
-
 MESSAGE_PROTOCOL = 'q2q-message'
 port = 8788
 
@@ -1537,7 +1535,7 @@ class Q2Q(AMP, subproducer.SuperProducer):
 
         attemptDeferreds = [att.startAttempt() for att in attemptObjects]
 
-        d = FOOCBDeferredList(attemptDeferreds,
+        d = defer.DeferredList(attemptDeferreds,
                               fireOnOneCallback=True,
                               fireOnOneErrback=False)
         def dontLogThat(e):
@@ -1545,6 +1543,15 @@ class Q2Q(AMP, subproducer.SuperProducer):
 
         for attDef in attemptDeferreds:
             attDef.addErrback(dontLogThat)
+
+        def _unfortunate_defer_hack(results):
+            #Do you see what you've made me become?
+            if isinstance(results, tuple):
+                stuff = [(False, None)] * len(attemptObjects)
+                stuff[results[1]] = (True, results[0])
+                return stuff
+            return results
+
 
         def gotResults(results):
             theResult = None
@@ -1565,6 +1572,7 @@ class Q2Q(AMP, subproducer.SuperProducer):
                 reason = Failure(AttemptsFailed([fobj for (f, fobj) in results]))
                 return reason
 
+        d.addCallback(_unfortunate_defer_hack)
         d.addCallback(gotResults)
         return d
 
