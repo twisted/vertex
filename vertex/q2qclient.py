@@ -310,8 +310,8 @@ class Q2QSigma(Options):
 
 class UserAdder(AMP):
     def connectionMade(self):
-        self.d = AddUser(name=self.factory.name,
-                         password=self.factory.password).do(self)
+        self.d = self.callRemote(AddUser, name=self.factory.name,
+                         password=self.factory.password)
 
 
 class UserAdderFactory(protocol.ClientFactory):
