@@ -641,7 +641,7 @@ class ConnectionTestMixin:
         def connected(proto):
             d1 = self.assertFailure(proto.callRemote(Fatal), FatalError)
             def noMoreCalls(_):
-                 self.assertFailure(proto.callRemote(Flag),
+                return self.assertFailure(proto.callRemote(Flag),
                                     ConnectionDone)
             d1.addCallback(noMoreCalls)
             return d1
