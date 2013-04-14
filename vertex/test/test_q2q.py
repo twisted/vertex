@@ -33,7 +33,8 @@ def noResources(*a):
 class FakeConnectTCP:
     implements(IResolverSimple)
 
-    def __init__(self, connectTCP):
+    def __init__(self, tester, connectTCP):
+        self.tester = tester
         self._connectTCP = connectTCP
         self.hostPortToHostPort = {}
         self.hostToLocalHost = {}
@@ -50,9 +51,22 @@ class FakeConnectTCP:
         self.hostPortToHostPort[(localIP, fakePortNumber)] = (localIP, realPortNumber)
         self.hostPortToHostPort[(hostname, fakePortNumber)] = (hostname, realPortNumber)
 
+    def _cleanupClient(self, client):
+        client.transport.closingDeferred = defer.Deferred()
+        transport_connectionLost = client.transport.connectionLost
+        def connectionLost(*args, **kwargs):
+            transport_connectionLost(*args, **kwargs)
+            if not client.transport.closingDeferred.called:
+                client.transport.closingDeferred.callback(None)
+        client.transport.connectionLost = connectionLost
+        self.tester.addCleanup(lambda: client.transport.closingDeferred)
+
     def connectTCP(self, host, port, *args, **kw):
         localhost, localport = self.hostPortToHostPort.get((host,port), (host, port))
-        return self._connectTCP(localhost, localport, *args, **kw)
+        client = self._connectTCP(localhost, localport, *args, **kw)
+        self._cleanupClient(client)
+        self.tester.addCleanup(client.transport.loseConnection)
+        return client
 
     def getHostSync(self,name):
         result = self.hostToLocalHost[name]
@@ -335,7 +349,7 @@ class Q2QConnectionTestCase(unittest.TestCase):
         # A mapping of host names to port numbers Our connectTCP will always
         # connect to 127.0.0.1 and on a port which is a value in this
         # dictionary.
-        fakeDNS = FakeConnectTCP(reactor.connectTCP)
+        fakeDNS = FakeConnectTCP(self, reactor.connectTCP)
         reactor.connectTCP = fakeDNS.connectTCP
 
         # ALSO WE MUST DO OTHER SIMILAR THINGS
