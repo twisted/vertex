@@ -1132,21 +1132,19 @@ class Q2Q(AMP, subproducer.SuperProducer):
 
         result = []             # list of listener dicts
 
+        d = defer.Deferred()
         if srvfacts:
+            def appendTCPMethod(addr, TCPMethod):
+                localMethods.append(TCPMethod("%s:%d" % addr))
             log.msg("local factories found for inbound request: %r" % (srvfacts,))
             localMethods = []
             publicIP = self._determinePublicIP()
             privateIP = self._determinePrivateIP()
             if self.service.inboundTCPPort is not None:
                 tcpPort = self.service.inboundTCPPort.getHost().port
-                localMethods.append(TCPMethod(
-                        '%s:%d' %
-                        (publicIP, tcpPort)))
+                appendTCPMethod((publicIP, tcpPort), TCPMethod)
                 if publicIP != privateIP:
-                    localMethods.append(TCPMethod(
-                            '%s:%d' %
-                            (privateIP, tcpPort)))
-
+                    appendTCPMethod((privateIP, tcpPort), TCPMethod)
             if not self.service.udpEnabled:
                 log.msg("udp not enabled -- but I so want to send udp traffic!")
             elif udp_source is None:
@@ -1162,66 +1160,70 @@ class Q2Q(AMP, subproducer.SuperProducer):
                         "local public IP: %s, local private IP: %s"
                         % (remoteUDPHost, remoteUDPPort, publicIP, privateIP) )
 
-                    # Seed my NAT from my shared UDP port
-                    udpPort = self.service.dispatcher.seedNAT(udp_source, self.service.sharedUDPPortnum)
+                    @d.addCallback
+                    def cb_methods(x):
+                        # Seed my NAT from my shared UDP port
+                        localUDP = self.service.dispatcher.seedNAT(udp_source, self.service.sharedUDPPortnum)
+                        return self._determinePublicUDPPortNumber(localUDP)
+                    @d.addCallback
+                    def cb_shared(pubAddr):
+                        udpAddrIP, udpPort = pubAddr
+                        if remoteUDPHost == publicIP and publicIP != privateIP:
+                            log.msg(
+                                "Remote IP matches local, public IP %r;"
+                                " preferring internal IP %r" % (publicIP, privateIP))
+                            appendTCPMethod((privateIP, udpPort), PTCPMethod)
+                        appendTCPMethod((publicIP, udpPort), PTCPMethod)
+                        # XXX CLEANUP!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+                        # !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+                        # !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+                        localUDP = self.service.dispatcher.seedNAT(udp_source)
+                        return self._determinePublicUDPPortNumber(localUDP).addCallback(appendTCPMethod, PTCPMethod)
+                    @d.addCallback
+                    def cb_PTCP(x):
+                        localUDP = self.service.dispatcher.seedNAT(udp_source)
+                        return self._determinePublicUDPPortNumber(localUDP).addCallback(appendTCPMethod, RPTCPMethod)
+            @d.addCallback
+            def cb_complete(x):
+                if self.service.virtualEnabled:
+                    localMethods.append(VirtualMethod())
+                log.msg('responding to inbound with local methods: %r' % (localMethods,))
 
-                    if remoteUDPHost == publicIP and publicIP != privateIP:
-                        log.msg(
-                            "Remote IP matches local, public IP %r;"
-                            " preferring internal IP %r" % (publicIP, privateIP))
-                        localMethods.append(
-                            PTCPMethod("%s:%d" % (privateIP, udpPort)))
-                    localMethods.append(
-                        PTCPMethod("%s:%d" % (publicIP, udpPort)))
+                for serverFactory, description in srvfacts:
+                    expiryTime, listenID = self.service.mapListener(
+                        to, From, protocol, serverFactory)
+                    result.append(dict(id=listenID,
+                                       expires=expiryTime,
+                                       methods=localMethods,
+                                       description=description))
 
-                    # XXX CLEANUP!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-                    # !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-                    # !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-                    privateUDPPort = self.service.dispatcher.seedNAT(udp_source)
-                    localMethods.append(
-                        PTCPMethod('%s:%d' % (publicIP, privateUDPPort)))
+        # We've looked for our local factory.  Let's see if we have any
+        # listening protocols elsewhere.
+        @d.addCallback
+        def listeningProtocolsCB(x):
+            key = (to, protocol)
+            if key in self.service.listeningClients:
+                args = dict(From=From,
+                            to=to,
+                            protocol=protocol,
+                            udp_source=udp_source)
+                DL = []
+                lclients = self.service.listeningClients[key]
+                log.msg("listeners found for %s:%r" % (to, protocol))
+                for listener, listenCert, desc in lclients:
+                    log.msg("relaying inbound to %r via %r" % (to, listener))
+                    DL.append(listener.callRemote(Inbound, **args).addCallback(
+                        self._massageClientInboundResponse, listener, result))
 
-                    udpxPort = self.service.dispatcher.seedNAT(udp_source)
-                    localMethods.append(
-                        RPTCPMethod("%s:%d" % (publicIP, udpxPort)))
-
-            if self.service.virtualEnabled:
-                localMethods.append(VirtualMethod())
-            log.msg('responding to inbound with local methods: %r' % (localMethods,))
-
-            for serverFactory, description in srvfacts:
-                expiryTime, listenID = self.service.mapListener(
-                    to, From, protocol, serverFactory)
-                result.append(dict(id=listenID,
-                                   expires=expiryTime,
-                                   methods=localMethods,
-                                   description=description))
-
-            # We've looked for our local factory.  Let's see if we have any
-            # listening protocols elsewhere.
-
-
-        key = (to, protocol)
-        if key in self.service.listeningClients:
-            args = dict(From=From,
-                        to=to,
-                        protocol=protocol,
-                        udp_source=udp_source)
-            DL = []
-            lclients = self.service.listeningClients[key]
-            log.msg("listeners found for %s:%r" % (to, protocol))
-            for listener, listenCert, desc in lclients:
-                log.msg("relaying inbound to %r via %r" % (to, listener))
-                DL.append(listener.callRemote(Inbound, **args).addCallback(
-                    self._massageClientInboundResponse, listener, result))
-
-            def allListenerResponses(x):
-                log.msg("all inbound responses received: %s" % (pformat(result),))
+                def allListenerResponses(x):
+                    log.msg("all inbound responses received: %s" % (pformat(result),))
+                    return dict(listeners=result)
+                return defer.DeferredList(DL).addCallback(allListenerResponses)
+            else:
+                log.msg("no listenening clients for %s:%r. local methods: %r" % (to,protocol, result))
                 return dict(listeners=result)
-            return defer.DeferredList(DL).addCallback(allListenerResponses)
-        else:
-            log.msg("no listenening clients for %s:%r. local methods: %r" % (to,protocol, result))
-            return dict(listeners=result)
+        d.callback(None)
+        return d
 
 
     def _massageClientInboundResponse(self, inboundResponse, listener, result):
@@ -1242,6 +1244,13 @@ class Q2Q(AMP, subproducer.SuperProducer):
                     listener.transport)
                 listenerInfo['certificate'] = allowedCertificate
                 result.append(listenerInfo)
+
+    def _determinePublicUDPPortNumber(self, localUDP):
+         d = defer.Deferred()
+         addressDiscoveryFactory = _AddressDiscoveryFactory(d)
+         gp = self.transport.getPeer()
+         self.service.dispatcher.connectPTCP(gp.host, gp.port, addressDiscoveryFactory, localUDP)
+         return d
 
     def _determinePublicIP(self):
         reservePublicIP = None
