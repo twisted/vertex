@@ -1,3 +1,4 @@
+[![Build Status](https://travis-ci.org/cyli/vertex.png)](https://travis-ci.org/cyli/vertex)
 
 Divmod Vertex
 =============
