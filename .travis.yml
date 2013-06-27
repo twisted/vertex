@@ -1,6 +1,5 @@
 language: python
 python:
-    - '2.6'
     - '2.7'
 
 # Epsilon's setup.py does not have Twisted as an install_requires, so
@@ -14,3 +13,6 @@ install:
 script:
   - pyflakes vertex bin prime
   - trial vertex
+
+notifications:
+  email: false
