@@ -36,6 +36,7 @@ class ConnectionCache:
         self.cachedConnections = {}
         # map (fromAddress, toAddress, protoName): list of Deferreds
         self.inProgress = {}
+        self._shuttingDown = None
 
     def connectCached(self, endpoint, protocolFactory,
                       extraWork=lambda x: x,
@@ -68,6 +69,10 @@ class ConnectionCache:
     def connectionLostForKey(self, key):
         if key in self.cachedConnections:
             del self.cachedConnections[key]
+        if self._shuttingDown and self._shuttingDown.get(key):
+            d, self._shuttingDown[key] = self._shuttingDown[key], None
+            d.callback(None)
+
 
     def connectionFailedForKey(self, key, reason):
         deferreds = self.inProgress.pop(key)
@@ -75,9 +80,12 @@ class ConnectionCache:
             d.errback(reason)
 
     def shutdown(self):
+        self._shuttingDown = {key: Deferred()
+                              for key in self.cachedConnections.keys()}
         return DeferredList(
             [maybeDeferred(p.transport.loseConnection)
-             for p in self.cachedConnections.values()])
+             for p in self.cachedConnections.values()]
+             + self._shuttingDown.values())
 
 
 class _CachingClientFactory(ClientFactory):
