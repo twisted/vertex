@@ -1,4 +1,3 @@
 include LICENSE
 include NAME.txt
-include requirements.txt
 include doc/q2q-standalone.tac
