@@ -545,7 +545,6 @@ class Transload:
                 self._connectedPeer, peer)
 
     def _connectedPeer(self, proto, peer):
-        knowledge = self.peers[peer]
         proto.get(self.name, self.mask)
 
     def peerNeedsData(self, peer):

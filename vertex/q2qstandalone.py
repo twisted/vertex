@@ -85,7 +85,6 @@ class StandaloneQ2Q(DependencyService):
         store = DirectoryCertificateAndUserStore(path)
         # store.addPrivateCertificate("kazekage")
         # store.addUser("kazekage", "username", "password1234")
-        iaf = IdentityAdminFactory(store)
 
         self.attach(q2q.Q2QService(
                 protocolFactoryFactory=IdentityAdminFactory(store).examineRequest,

@@ -8,7 +8,7 @@ import getpass
 from twisted.protocols.amp import AMP
 
 from vertex import q2q, sigma
-from twisted.python.usage import Options, UsageError
+from twisted.python.usage import Options
 
 from twisted.python import log
 from twisted.internet import reactor
@@ -262,7 +262,6 @@ class Q2QSend(Options):
         toAddress = fs(self.to)
         fromAddress = self.parent.getFrom()
 
-        toDomain = toAddress.domainAddress()
         svc = self.parent.getService()
         svc.connectQ2Q(fromAddress, toAddress, 'file-transfer',
                        FileSenderFactory(self))
