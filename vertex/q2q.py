@@ -2556,7 +2556,7 @@ class Q2QService(service.MultiService, protocol.ServerFactory):
 
         return self.connectCachedQ2Q(
             fromAddress, toAddress, MESSAGE_PROTOCOL, theMessageFactory
-            ).addCallback(message.do, namespace)
+            ).addCallback(AMP.callRemote, message, namespace)
 
 
     def messageChannel(self, fromAddress, toAddress, namespace):
