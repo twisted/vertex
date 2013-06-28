@@ -1,13 +1,12 @@
-from epsilon import setuphelper
+from setuptools import setup
 
-from vertex import version
-
-setuphelper.autosetup(
+setup(
     name="Vertex",
-    version=version.short(),
+    version="0.3.0",
     maintainer="Divmod, Inc.",
     maintainer_email="support@divmod.org",
-    url="http://divmod.org/trac/wiki/DivmodVertex",
+    url="https://github.com/twisted/vertex",
+    packages=["vertex"],
     license="MIT",
     platforms=["any"],
     description=
@@ -27,5 +26,5 @@ setuphelper.autosetup(
         "Topic :: Internet :: File Transfer Protocol (FTP)",
         "Topic :: Internet :: Name Service (DNS)",
         "Topic :: Software Development :: Libraries :: Python Modules",
-        ],
-    )
+    ],
+)
