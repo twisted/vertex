@@ -7,6 +7,7 @@ setup(
     maintainer_email="support@divmod.org",
     url="https://github.com/twisted/vertex",
     packages=["vertex"],
+    install_requires=['Twisted>=13.0.0', 'pyOpenSSL>=0.13'],
     license="MIT",
     platforms=["any"],
     description=

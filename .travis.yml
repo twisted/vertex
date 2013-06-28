@@ -2,12 +2,9 @@ language: python
 python:
     - '2.7'
 
-# Epsilon's setup.py does not have Twisted as an install_requires, so
-# including it in requirements.txt fails
 install:
   - pip install pyflakes --use-mirrors
-  - pip install -r requirements.txt --use-mirrors
-  - pip install Epsilon==0.6.0
+  - pip install . --use-mirrors
 
 # no pep8, since vertex uses twisted pep8
 script:
