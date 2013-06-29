@@ -25,7 +25,7 @@ def operate(operation):
             return operation(other, self)
         new = BitArray(size=len(self))
         for offt, (mybit, hisbit) in enumerate(zip(self, other)):
-            new[offt] = operation(mybit, hisbit)
+            result = new[offt] = operation(mybit, hisbit)
 
         for j in range(offt+1, len(self)):
             new[j] = operation(self[j], 0)

@@ -21,7 +21,8 @@ from twisted.internet.error import ConnectionDone
 from zope.interface import implements
 from twisted.internet.interfaces import IResolverSimple
 
-from twisted.protocols.amp import UnknownRemoteError, QuitBox, Command, AMP
+from twisted.protocols.amp import (
+    UnhandledCommand, UnknownRemoteError, QuitBox, Command, AMP)
 
 from vertex import q2q
 

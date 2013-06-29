@@ -387,7 +387,7 @@ class VirtualConnectionAttempt(AbstractConnectionAttempt):
             cid = -cid
         innerTransport = VirtualTransport(self.q2qproto, cid, self, True)
         def startit(result):
-            innerTransport.startProtocol()
+            proto = innerTransport.startProtocol()
             return self.deferred
 
         d = self.q2qproto.callRemote(Virtual, id=cid)
