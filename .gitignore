@@ -1,0 +1,14 @@
+*.pyc
+
+*.egg
+*.egg-info
+dist
+build
+
+pip-log.txt
+
+_trial_*
+.coverage
+
+*~
+*.swp
