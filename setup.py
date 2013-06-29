@@ -1,9 +1,11 @@
 from setuptools import setup
 
+from vertex import version
+
 setup(
     name="Vertex",
-    version="0.3.0",
-    maintainer="Divmod, Inc.",
+    version=version.short(),
+    maintainer="Vertex developers",
     maintainer_email="support@divmod.org",
     url="https://github.com/twisted/vertex",
     packages=["vertex"],
