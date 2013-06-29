@@ -176,7 +176,7 @@ class PTCPTransportTestCase(ConnectedPTCPMixin, unittest.TestCase):
         def connectionsMade(ignored):
             return defer.DeferredList([serverProto.transport.whoami(), clientProto.transport.whoami()]).addCallback(gotAddress)
 
-        clientConnID = clientTransport.connect(cf, '127.0.0.1', serverPort.getHost().port)
+        clientTransport.connect(cf, '127.0.0.1', serverPort.getHost().port)
 
         return defer.DeferredList([serverProto.onConnect, clientProto.onConnect]).addCallback(connectionsMade)
 
@@ -189,7 +189,7 @@ class PTCPTransportTestCase(ConnectedPTCPMixin, unittest.TestCase):
          serverPort, clientPort) = self.setUpForATest()
 
 
-        clientConnID = clientTransport.connect(cf, '127.0.0.1', serverPort.getHost().port)
+        clientTransport.connect(cf, '127.0.0.1', serverPort.getHost().port)
 
         def sendSomeBytes(ignored, n=10, server=False):
             if n:
@@ -233,7 +233,7 @@ class PTCPTransportTestCase(ConnectedPTCPMixin, unittest.TestCase):
                 ''.join([chr(n) * serverProto.WRITE_SIZE
                          for n in range(serverProto.NUM_WRITES)]))
 
-        clientConnID = clientTransport.connect(cf, '127.0.0.1', serverPort.getHost().port)
+        clientTransport.connect(cf, '127.0.0.1', serverPort.getHost().port)
         return clientProto.onDisconn.addCallback(disconnected)
 
 
@@ -260,7 +260,7 @@ class PTCPTransportTestCase(ConnectedPTCPMixin, unittest.TestCase):
             return clientProto.gotBytes(BYTES).addCallback(cbBytes)
 
 
-        clientConnID = clientTransport.connect(cf, '127.0.0.1', serverPort.getHost().port)
+        clientTransport.connect(cf, '127.0.0.1', serverPort.getHost().port)
         connD = defer.DeferredList([clientProto.onConnect, serverProto.onConnect])
         connD.addCallback(cbConnect)
         return connD
@@ -298,7 +298,7 @@ class PTCPTransportTestCase(ConnectedPTCPMixin, unittest.TestCase):
             clientProto.transport.pauseProducing()
             return clientProto.onDisconn.addCallback(cbBytes)
 
-        clientConnID = clientTransport.connect(cf, '127.0.0.1', serverPort.getHost().port)
+        clientTransport.connect(cf, '127.0.0.1', serverPort.getHost().port)
         connD = defer.DeferredList([clientProto.onConnect, serverProto.onConnect])
         connD.addCallback(cbConnect)
         return connD
@@ -338,7 +338,7 @@ class TimeoutTestCase(ConnectedPTCPMixin, unittest.TestCase):
          serverPort, clientPort) = self.setUpForATest()
 
         clientTransport.sendPacket = lambda *a, **kw: None
-        clientConnID = clientTransport.connect(cf, '127.0.0.1', serverPort.getHost().port)
+        clientTransport.connect(cf, '127.0.0.1', serverPort.getHost().port)
         return cf.onConnect.addBoth(lambda result: result.trap(error.TimeoutError) and None)
 
     def testDataTimeout(self):
@@ -358,7 +358,7 @@ class TimeoutTestCase(ConnectedPTCPMixin, unittest.TestCase):
                                                            # option somewhere
             return clientProto.onDisconn
 
-        clientConnID = clientTransport.connect(cf, '127.0.0.1', serverPort.getHost().port)
+        clientTransport.connect(cf, '127.0.0.1', serverPort.getHost().port)
 
         d = defer.DeferredList([serverProto.onConnect, clientProto.onConnect])
         d.addCallback(cbConnected)

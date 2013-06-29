@@ -1,8 +1,5 @@
 # Copyright 2005 Divmod, Inc.  See LICENSE file for details
 
-from cStringIO import StringIO
-
-from twisted.internet.protocol import FileWrapper
 from twisted.internet import defer
 from twisted.python.failure import Failure
 from twisted.python.filepath import FilePath

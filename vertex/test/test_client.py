@@ -1,7 +1,6 @@
 
 from twisted.trial import unittest
 from vertex import q2qclient
-from twisted.python.usage import UsageError
 import sys
 from StringIO import StringIO
 

@@ -33,7 +33,6 @@ class StateMachine:
         self.state = newstate
 
     def input(self, datum, *a, **kw):
-        oldstate = self.state
         if datum == NOTHING:
             return
         try:
