@@ -1,14 +1,8 @@
 *.pyc
 
-*.egg
-*.egg-info
+Vertex.egg-info
 dist
 build
 
-pip-log.txt
-
-_trial_*
-.coverage
-
-*~
-*.swp
+_trial_temp*
+.coverage*

@@ -5,11 +5,12 @@ from vertex import version
 setup(
     name="Vertex",
     version=version.short(),
-    maintainer="Vertex developers",
-    maintainer_email="support@divmod.org",
+    maintainer="Twisted Matrix Laboratories",
+    maintainer_email="vertex-dev@twistedmatrix.com",
     url="https://github.com/twisted/vertex",
-    packages=["vertex"],
-    install_requires=['Twisted>=13.0.0', 'pyOpenSSL>=0.13'],
+    packages=["vertex", "vertex.scripts", "vertex.test"],
+    scripts=["bin/gvertex", "bin/vertex"],
+    install_requires=['Twisted>=13.1.0', 'pyOpenSSL>=0.13'],
     license="MIT",
     platforms=["any"],
     description=
