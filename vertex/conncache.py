@@ -1,5 +1,5 @@
 # Copyright 2005 Divmod, Inc.  See LICENSE file for details
-# -*- test-case-name: vertex.test.test_q2q.TCPConnection.testSendingFiles -*-
+# -*- test-case-name: vertex.test.test_conncache,vertex.test.test_q2q.TCPConnection.testSendingFiles -*-
 
 """
 Connect between two endpoints using a message-based protocol to exchange
