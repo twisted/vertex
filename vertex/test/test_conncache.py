@@ -6,6 +6,7 @@ Tests for L{vertex.conncache}.
 """
 
 from twisted.internet.protocol import ClientFactory, Protocol
+from twisted.internet.defer import Deferred
 from twisted.trial.unittest import TestCase
 
 from vertex import conncache
@@ -30,6 +31,13 @@ class FakeEndpoint(object):
         @param factory: factory to connect
         """
         self.factories.append(factory)
+
+
+
+class DisconnectingTransport(object):
+    def loseConnection(self):
+        self.loseConnectionDeferred = Deferred()
+        return self.loseConnectionDeferred
 
 
 
@@ -113,3 +121,51 @@ class TestConnectionCache(TestCase):
         connectedProtocol.makeConnection(object())
 
         self.assertEqual(self.successResultOf(d), protocol)
+
+
+    def test_shutdown_waitsForConnectionLost(self):
+        """
+        L{conncache.ConnectionCache.shutdwon} returns a
+        deferred that fires after all protocols have been
+        completely disconnected.
+
+        @see: U{http://mumak.net/stuff/twisted-disconnect.html}
+        """
+        endpoint = FakeEndpoint()
+        protocol = Protocol()
+        factory = ClientFactory()
+        factory.protocol = lambda: protocol
+        self.cache.connectCached(endpoint, factory)
+
+        connectedFactory = endpoint.factories.pop(0)
+        connectedProtocol = connectedFactory.buildProtocol(None)
+        transport = DisconnectingTransport()
+        connectedProtocol.makeConnection(transport)
+
+        d = self.cache.shutdown()
+        self.assertNoResult(d)
+        transport.loseConnectionDeferred.callback(None)
+        self.assertNoResult(d)
+        connectedFactory.clientConnectionLost(None, None)
+        self.successResultOf(d)
+
+
+    def test_shutdown_doesNotWaitForUnrequestedConnectionLost(self):
+        """
+        L{conncache.ConnectionCache.shutdwon} doesn't wait
+        for C{connectionLost} to be called, for protocols added with
+        L{conncache.ConnectionCache.cacheUnrequested}.
+        """
+        endpoint = FakeEndpoint()
+        protocol = Protocol()
+        transport = DisconnectingTransport()
+        protocol.transport = transport
+
+        key = object()
+
+        self.cache.cacheUnrequested(endpoint, key, protocol)
+
+        d = self.cache.shutdown()
+        self.assertNoResult(d)
+        transport.loseConnectionDeferred.callback(None)
+        self.successResultOf(d)
