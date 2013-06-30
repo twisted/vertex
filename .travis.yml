@@ -1,6 +1,7 @@
 language: python
 python:
     - '2.7'
+    - 'pypy'
 
 # Epsilon's setup.py does not have Twisted as an install_requires, so
 # including it in requirements.txt fails
