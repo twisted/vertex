@@ -9,6 +9,8 @@ from twisted.internet.protocol import ClientFactory, Protocol
 from twisted.internet.defer import Deferred
 from twisted.trial.unittest import TestCase
 from twisted.test.proto_helpers import StringTransport
+from twisted.internet.error import ConnectionDone
+from twisted.python.failure import Failure
 
 from vertex import conncache
 
@@ -196,5 +198,5 @@ class TestConnectionCache(TestCase):
         d = self.cache.shutdown()
         transport.loseConnectionDeferred.callback(None)
         self.assertNoResult(d)
-        protocol.connectionLost(None)
+        protocol.connectionLost(Failure(ConnectionDone))
         self.successResultOf(d)

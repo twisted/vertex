@@ -236,12 +236,12 @@ class SigmaProtocol(AMP):
 
 
     def connectionLost(self, reason):
-        AMP.connectionLost(self, reason)
         self.nexus.conns.connectionLostForKey((endpoint.Q2QEndpoint(
                 self.nexus.svc,
                 self.nexus.addr,
                 self.transport.getQ2QPeer(),
                 PROTOCOL_NAME), None))
+        AMP.connectionLost(self, reason)
 
 
     def stopProducing(self):
