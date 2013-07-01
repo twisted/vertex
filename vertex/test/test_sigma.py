@@ -15,8 +15,8 @@ from vertex.test.mock_data import data as TEST_DATA
 
 class FakeQ2QTransport(FakeTransport):
 
-    def __init__(self, q2qhost, q2qpeer):
-        FakeTransport.__init__(self)
+    def __init__(self, protocol, isServer, q2qhost, q2qpeer):
+        FakeTransport.__init__(self, protocol, isServer)
         self.q2qhost = q2qhost
         self.q2qpeer = q2qpeer
 
@@ -97,15 +97,11 @@ class FakeQ2QService:
             return defer.fail(reason)
         else:
             def makeFakeClient(c):
-                ft = FakeQ2QTransport(fromAddress, toAddress)
-                ft.isServer = False
-                ft.protocol = c
+                ft = FakeQ2QTransport(c, False, fromAddress, toAddress)
                 return ft
 
             def makeFakeServer(s):
-                ft = FakeQ2QTransport(toAddress, fromAddress)
-                ft.isServer = True
-                ft.protocol = s
+                ft = FakeQ2QTransport(s, True, toAddress, fromAddress)
                 return ft
 
             client, server, pump = connectedServerAndClient(

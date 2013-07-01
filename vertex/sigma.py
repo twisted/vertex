@@ -236,6 +236,7 @@ class SigmaProtocol(AMP):
 
 
     def connectionLost(self, reason):
+        AMP.connectionLost(self, reason)
         self.nexus.conns.connectionLostForKey((endpoint.Q2QEndpoint(
                 self.nexus.svc,
                 self.nexus.addr,
