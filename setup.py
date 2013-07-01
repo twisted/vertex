@@ -10,7 +10,6 @@ setup(
     url="https://github.com/twisted/vertex",
     packages=["vertex", "vertex.scripts", "vertex.test"],
     scripts=["bin/gvertex", "bin/vertex"],
-    setup_requires=['Twisted>=13.1.0'],
     install_requires=['Twisted>=13.1.0', 'pyOpenSSL>=0.13'],
     license="MIT",
     platforms=["any"],
