@@ -1,13 +1,16 @@
-from epsilon import setuphelper
+from setuptools import setup
 
 from vertex import version
 
-setuphelper.autosetup(
+setup(
     name="Vertex",
     version=version.short(),
-    maintainer="Divmod, Inc.",
-    maintainer_email="support@divmod.org",
-    url="http://divmod.org/trac/wiki/DivmodVertex",
+    maintainer="Twisted Matrix Laboratories",
+    maintainer_email="vertex-dev@twistedmatrix.com",
+    url="https://github.com/twisted/vertex",
+    packages=["vertex", "vertex.scripts", "vertex.test"],
+    scripts=["bin/gvertex", "bin/vertex"],
+    install_requires=['Twisted>=13.1.0', 'pyOpenSSL>=0.13'],
     license="MIT",
     platforms=["any"],
     description=
@@ -27,5 +30,5 @@ setuphelper.autosetup(
         "Topic :: Internet :: File Transfer Protocol (FTP)",
         "Topic :: Internet :: Name Service (DNS)",
         "Topic :: Software Development :: Libraries :: Python Modules",
-        ],
-    )
+    ],
+)

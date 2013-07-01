@@ -1,0 +1,8 @@
+*.pyc
+
+Vertex.egg-info
+dist
+build
+
+_trial_temp*
+.coverage*
