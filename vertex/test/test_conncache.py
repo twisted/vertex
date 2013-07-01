@@ -172,6 +172,8 @@ class TestConnectionCache(TestCase):
         self.assertNoResult(d)
         transport.loseConnectionDeferred.callback(None)
         self.successResultOf(d)
+    test_shutdown_doesNotWaitForUnrequestedConnectionLost.skip = (
+            ".cacheUnrequested interface not well defined.")
 
 
     def test_shutdown_doesNotWaitForUnrequestedConnectionLost_sigma(self):
