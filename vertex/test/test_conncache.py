@@ -8,8 +8,11 @@ Tests for L{vertex.conncache}.
 from twisted.internet.protocol import ClientFactory, Protocol
 from twisted.internet.defer import Deferred
 from twisted.trial.unittest import TestCase
+from twisted.test.proto_helpers import StringTransport
 
 from vertex import conncache
+
+from vertex import sigma
 
 
 class FakeEndpoint(object):
@@ -34,7 +37,7 @@ class FakeEndpoint(object):
 
 
 
-class DisconnectingTransport(object):
+class DisconnectingTransport(StringTransport):
     def loseConnection(self):
         self.loseConnectionDeferred = Deferred()
         return self.loseConnectionDeferred
@@ -168,4 +171,28 @@ class TestConnectionCache(TestCase):
         d = self.cache.shutdown()
         self.assertNoResult(d)
         transport.loseConnectionDeferred.callback(None)
+        self.successResultOf(d)
+
+
+    def test_shutdown_doesNotWaitForUnrequestedConnectionLost_sigma(self):
+        """
+        L{conncache.ConnectionCache.shutdwon} doesn't wait
+        for C{connectionLost} to be called, for protocols added with
+        L{conncache.ConnectionCache.cacheUnrequested}.
+        """
+        class FakeNexus(object):
+            conns = self.cache
+            addr = object()
+            svc = object()
+
+        protocol = sigma.SigmaProtocol(FakeNexus())
+        transport = DisconnectingTransport()
+        q2qPeer = object()
+        transport.getQ2QPeer = lambda: q2qPeer
+
+        protocol.makeConnection(transport)
+        d = self.cache.shutdown()
+        transport.loseConnectionDeferred.callback(None)
+        self.assertNoResult(d)
+        protocol.connectionLost(None)
         self.successResultOf(d)
