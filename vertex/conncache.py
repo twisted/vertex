@@ -67,6 +67,12 @@ class ConnectionCache:
             d.callback(protocol)
 
     def connectionLostForKey(self, key):
+        """
+        Remove lost connection from cache.
+
+        @param key: key of connection that was lost
+        @type key: L{tuple} of L{IAddress} and C{extraHash}
+        """
         if key in self.cachedConnections:
             del self.cachedConnections[key]
         if self._shuttingDown and self._shuttingDown.get(key):
@@ -80,6 +86,12 @@ class ConnectionCache:
             d.errback(reason)
 
     def shutdown(self):
+        """
+        Disconnect all cached connections.
+
+        @returns: a deferred that fires once all connection are disconnected.
+        @rtype: L{Deferred}
+        """
         self._shuttingDown = {key: Deferred()
                               for key in self.cachedConnections.keys()}
         return DeferredList(
