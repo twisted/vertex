@@ -132,7 +132,7 @@ class TestConnectionCache(TestCase):
 
     def test_shutdown_waitsForConnectionLost(self):
         """
-        L{conncache.ConnectionCache.shutdwon} returns a
+        L{conncache.ConnectionCache.shutdown} returns a
         deferred that fires after all protocols have been
         completely disconnected.
 
@@ -155,7 +155,7 @@ class TestConnectionCache(TestCase):
 
     def test_shutdown_doesNotWaitForUnrequestedConnectionLost(self):
         """
-        L{conncache.ConnectionCache.shutdwon} doesn't wait
+        L{conncache.ConnectionCache.shutdown} doesn't wait
         for C{connectionLost} to be called, for protocols added with
         L{conncache.ConnectionCache.cacheUnrequested}.
         """
@@ -177,7 +177,7 @@ class TestConnectionCache(TestCase):
 
     def test_shutdown_doesNotWaitForUnrequestedConnectionLost_sigma(self):
         """
-        L{conncache.ConnectionCache.shutdwon} doesn't wait
+        L{conncache.ConnectionCache.shutdown} doesn't wait
         for C{connectionLost} to be called, for protocols added with
         L{conncache.ConnectionCache.cacheUnrequested}.
         """
