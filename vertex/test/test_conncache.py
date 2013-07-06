@@ -22,7 +22,8 @@ class FakeEndpoint(object):
     Fake vertex endpoint for tesing.
 
     @ivar factories: factories endpoint has been connected to.
-    @type factories: L{list} of L{ClientFactory<twisted.internet.protocol.ClientFactory>}s.
+    @type factories: L{list} of
+        L{ClientFactory<twisted.internet.protocol.ClientFactory>}s.
     """
 
     def __init__(self):
