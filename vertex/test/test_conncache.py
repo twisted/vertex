@@ -147,25 +147,3 @@ class TestConnectionCache(TestCase):
         self.assertNoResult(d)
         connectedFactory.clientConnectionLost(None, None)
         self.successResultOf(d)
-
-
-    def test_shutdown_doesNotWaitForUnrequestedConnectionLost(self):
-        """
-        L{conncache.ConnectionCache.shutdown} doesn't wait
-        for C{connectionLost} to be called, for protocols added with
-        L{conncache.ConnectionCache.cacheUnrequested}.
-        """
-        protocol = Protocol()
-        transport = DisconnectingTransport()
-        protocol.transport = transport
-
-        key = object()
-
-        self.cache.cacheUnrequested(self.endpoint, key, protocol)
-
-        d = self.cache.shutdown()
-        self.assertNoResult(d)
-        transport.loseConnectionDeferred.callback(None)
-        self.successResultOf(d)
-    test_shutdown_doesNotWaitForUnrequestedConnectionLost.skip = (
-            ".cacheUnrequested interface not well defined.")
