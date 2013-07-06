@@ -236,6 +236,10 @@ class SigmaProtocol(AMP):
 
 
     def connectionLost(self, reason):
+        """
+        Inform the associated L{conncache.ConnectionCache} that this
+        protocol has been disconnected.
+        """
         self.nexus.conns.connectionLostForKey((endpoint.Q2QEndpoint(
                 self.nexus.svc,
                 self.nexus.addr,

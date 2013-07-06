@@ -9,12 +9,8 @@ from twisted.internet.protocol import ClientFactory, Protocol
 from twisted.internet.defer import Deferred
 from twisted.trial.unittest import TestCase
 from twisted.test.proto_helpers import StringTransport
-from twisted.internet.error import ConnectionDone
-from twisted.python.failure import Failure
 
 from vertex import conncache
-
-from vertex import sigma
 
 
 class FakeEndpoint(object):
@@ -173,27 +169,3 @@ class TestConnectionCache(TestCase):
         self.successResultOf(d)
     test_shutdown_doesNotWaitForUnrequestedConnectionLost.skip = (
             ".cacheUnrequested interface not well defined.")
-
-
-    def test_shutdown_doesNotWaitForUnrequestedConnectionLost_sigma(self):
-        """
-        L{conncache.ConnectionCache.shutdown} doesn't wait
-        for C{connectionLost} to be called, for protocols added with
-        L{conncache.ConnectionCache.cacheUnrequested}.
-        """
-        class FakeNexus(object):
-            conns = self.cache
-            addr = object()
-            svc = object()
-
-        protocol = sigma.SigmaProtocol(FakeNexus())
-        transport = DisconnectingTransport()
-        q2qPeer = object()
-        transport.getQ2QPeer = lambda: q2qPeer
-
-        protocol.makeConnection(transport)
-        d = self.cache.shutdown()
-        transport.loseConnectionDeferred.callback(None)
-        self.assertNoResult(d)
-        protocol.connectionLost(Failure(ConnectionDone))
-        self.successResultOf(d)

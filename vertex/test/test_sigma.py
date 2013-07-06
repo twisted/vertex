@@ -3,15 +3,17 @@
 from twisted.internet import defer
 from twisted.python.failure import Failure
 from twisted.python.filepath import FilePath
+from twisted.internet.error import ConnectionDone
 
 from twisted.trial import unittest
 
 from twisted.test.iosim import connectedServerAndClient, FakeTransport
 
 from vertex.q2q import Q2QAddress
-from vertex import sigma
+from vertex import sigma, conncache
 
 from vertex.test.mock_data import data as TEST_DATA
+from vertex.test.test_conncache import DisconnectingTransport
 
 class FakeQ2QTransport(FakeTransport):
 
@@ -196,6 +198,37 @@ class BasicTransferTest(TestBase):
             self.assertEquals(rfile.open().read(),
                               TEST_DATA,
                               "file value mismatch")
+
+
+class TestSigmaConnectionCache(unittest.TestCase):
+    """
+    Tests for the interaction of L{sigma.SigmaProtocol} and
+    L{conncache.ConnectionCache}.
+    """
+
+    def test_connectionLost_unregistersFromConnectionCache(self):
+        """
+        L{sigma.SigmaProtocol.connectionLost} notifies the connection
+        cache that the connection is lost.
+        """
+        cache = conncache.ConnectionCache()
+
+        class FakeNexus(object):
+            conns = cache
+            addr = object()
+            svc = object()
+
+        protocol = sigma.SigmaProtocol(FakeNexus())
+        transport = DisconnectingTransport()
+        q2qPeer = object()
+        transport.getQ2QPeer = lambda: q2qPeer
+
+        protocol.makeConnection(transport)
+        d = cache.shutdown()
+        transport.loseConnectionDeferred.callback(None)
+        self.assertNoResult(d)
+        protocol.connectionLost(Failure(ConnectionDone))
+        self.successResultOf(d)
 
 
 def childrenOf(x):
