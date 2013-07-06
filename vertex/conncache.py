@@ -1,5 +1,5 @@
 # Copyright 2005 Divmod, Inc.  See LICENSE file for details
-# -*- test-case-name: vertex.test.test_q2q.TCPConnection.testSendingFiles -*-
+# -*- test-case-name: vertex.test.test_conncache,vertex.test.test_q2q.TCPConnection.testSendingFiles -*-
 
 """
 Connect between two endpoints using a message-based protocol to exchange
@@ -36,6 +36,7 @@ class ConnectionCache:
         self.cachedConnections = {}
         # map (fromAddress, toAddress, protoName): list of Deferreds
         self.inProgress = {}
+        self._shuttingDown = None
 
     def connectCached(self, endpoint, protocolFactory,
                       extraWork=lambda x: x,
@@ -66,8 +67,18 @@ class ConnectionCache:
             d.callback(protocol)
 
     def connectionLostForKey(self, key):
+        """
+        Remove lost connection from cache.
+
+        @param key: key of connection that was lost
+        @type key: L{tuple} of L{IAddress} and C{extraHash}
+        """
         if key in self.cachedConnections:
             del self.cachedConnections[key]
+        if self._shuttingDown and self._shuttingDown.get(key):
+            d, self._shuttingDown[key] = self._shuttingDown[key], None
+            d.callback(None)
+
 
     def connectionFailedForKey(self, key, reason):
         deferreds = self.inProgress.pop(key)
@@ -75,9 +86,18 @@ class ConnectionCache:
             d.errback(reason)
 
     def shutdown(self):
+        """
+        Disconnect all cached connections.
+
+        @returns: a deferred that fires once all connection are disconnected.
+        @rtype: L{Deferred}
+        """
+        self._shuttingDown = {key: Deferred()
+                              for key in self.cachedConnections.keys()}
         return DeferredList(
             [maybeDeferred(p.transport.loseConnection)
-             for p in self.cachedConnections.values()])
+             for p in self.cachedConnections.values()]
+             + self._shuttingDown.values())
 
 
 class _CachingClientFactory(ClientFactory):
