@@ -56,9 +56,22 @@ class TestConnectionCache(TestCase):
 
     def setUp(self):
         """
-        Create a L{conncache.ConnectionCache} to test against.
+        Create a L{conncache.ConnectionCache}, endpoint and protocol to test
+        against.
         """
         self.cache = conncache.ConnectionCache()
+        self.endpoint = FakeEndpoint()
+        self.protocol = Protocol()
+
+
+    def getCachedConnection(self):
+        """
+        Ask the L{conncache.ConnectionCache} for a connection to the endpoint
+        created in L{setUp}.
+        """
+        factory = ClientFactory()
+        factory.protocol = lambda: self.protocol
+        return self.cache.connectCached(self.endpoint, factory)
 
 
     def test_connectCached(self):
@@ -68,19 +81,15 @@ class TestConnectionCache(TestCase):
         to that endpoint and returns a deferred that fires
         with that protocol.
         """
-        endpoint = FakeEndpoint()
-        protocol = Protocol()
-        factory = ClientFactory()
-        factory.protocol = lambda: protocol
-        d = self.cache.connectCached(endpoint, factory)
+        d = self.getCachedConnection()
 
-        self.assertEqual(len(endpoint.factories), 1)
-        connectedFactory = endpoint.factories.pop(0)
+        self.assertEqual(len(self.endpoint.factories), 1)
+        connectedFactory = self.endpoint.factories.pop(0)
         connectedProtocol = connectedFactory.buildProtocol(None)
         self.assertNoResult(d)
         connectedProtocol.makeConnection(object())
 
-        self.assertEqual(self.successResultOf(d), protocol)
+        self.assertEqual(self.successResultOf(d), self.protocol)
 
 
     def test_connectCached_cachedConnection(self):
@@ -89,20 +98,16 @@ class TestConnectionCache(TestCase):
         L{conncache.ConnectionCache.connectCache} returns
         a deferred that has been fired with that protocol.
         """
-        endpoint = FakeEndpoint()
-        protocol = Protocol()
-        factory = ClientFactory()
-        factory.protocol = lambda: protocol
-        self.cache.connectCached(endpoint, factory)
+        self.getCachedConnection()
 
-        connectedFactory = endpoint.factories.pop(0)
+        connectedFactory = self.endpoint.factories.pop(0)
         connectedProtocol = connectedFactory.buildProtocol(None)
         connectedProtocol.makeConnection(object())
 
-        d = self.cache.connectCached(endpoint, object())
+        d = self.getCachedConnection()
 
-        self.assertEqual(len(endpoint.factories), 0)
-        self.assertEqual(self.successResultOf(d), protocol)
+        self.assertEqual(len(self.endpoint.factories), 0)
+        self.assertEqual(self.successResultOf(d), self.protocol)
 
 
     def test_connectCached_inProgressConnection(self):
@@ -111,21 +116,17 @@ class TestConnectionCache(TestCase):
         L{conncache.ConnectionCache.connectCache} returns
         a deferred that fires with that protocol.
         """
-        endpoint = FakeEndpoint()
-        protocol = Protocol()
-        factory = ClientFactory()
-        factory.protocol = lambda: protocol
-        self.cache.connectCached(endpoint, factory)
-        connectedFactory = endpoint.factories.pop(0)
+        self.getCachedConnection()
+        connectedFactory = self.endpoint.factories.pop(0)
 
-        d = self.cache.connectCached(endpoint, object())
-        self.assertEqual(len(endpoint.factories), 0)
+        d = self.getCachedConnection()
+        self.assertEqual(len(self.endpoint.factories), 0)
         self.assertNoResult(d)
 
         connectedProtocol = connectedFactory.buildProtocol(None)
         connectedProtocol.makeConnection(object())
 
-        self.assertEqual(self.successResultOf(d), protocol)
+        self.assertEqual(self.successResultOf(d), self.protocol)
 
 
     def test_shutdown_waitsForConnectionLost(self):
@@ -136,13 +137,9 @@ class TestConnectionCache(TestCase):
 
         @see: U{http://mumak.net/stuff/twisted-disconnect.html}
         """
-        endpoint = FakeEndpoint()
-        protocol = Protocol()
-        factory = ClientFactory()
-        factory.protocol = lambda: protocol
-        self.cache.connectCached(endpoint, factory)
+        self.getCachedConnection()
 
-        connectedFactory = endpoint.factories.pop(0)
+        connectedFactory = self.endpoint.factories.pop(0)
         connectedProtocol = connectedFactory.buildProtocol(None)
         transport = DisconnectingTransport()
         connectedProtocol.makeConnection(transport)
@@ -161,14 +158,13 @@ class TestConnectionCache(TestCase):
         for C{connectionLost} to be called, for protocols added with
         L{conncache.ConnectionCache.cacheUnrequested}.
         """
-        endpoint = FakeEndpoint()
         protocol = Protocol()
         transport = DisconnectingTransport()
         protocol.transport = transport
 
         key = object()
 
-        self.cache.cacheUnrequested(endpoint, key, protocol)
+        self.cache.cacheUnrequested(self.endpoint, key, protocol)
 
         d = self.cache.shutdown()
         self.assertNoResult(d)
