@@ -36,12 +36,13 @@ Issues
 ------
 Issues should generally be opened first, and pull requests linked to issues for the following reasons:
 
-    - Writing the issue first will help clarify what needs to be done for both a contributor and a reviewer
-    - If a pull request is abandoned, it may be closed without also closing the underlying issue.
-    - If the work is taken over by someone else, both the old and new pull requests may be linked to the same issue.
-    - Overall discussion of how to go about resolving the problem may happen in the issue, and code review can happen in a pull request.
+- Writing the issue first will help clarify what needs to be done for both a contributor and a reviewer
+- If a pull request is abandoned, it may be closed without also closing the underlying issue.
+- If the work is taken over by someone else, both the old and new pull requests may be linked to the same issue.
+- Overall discussion of how to go about resolving the problem may happen in the issue, and code review can happen in a pull request.
 
-Issues should have a meaningful title and description of what needs to change and why, although implementation details are not necessarily needed.
+Issues should have a meaningful title and description of what needs to change and why.
+Although implementation details are not necessarily needed, well-defined completion conditions should be included in the description (in list form would be helpful).
 
 
 Pull Requests
@@ -63,6 +64,7 @@ To pass review, pull requests should:
 1. follow the stated coding standard
 1. have 100% unit test coverage of modified and new code (even if it didn't have tests before)
 1. have 100% API docstring coverage for all modified and new code (even if it didn't have docs before)
+1. have prose documentation giving a high-level sense of how an API is meant to be used and what capabilities the library offers. 
 
 Once a pull request is approved, the big green button should be used to merge.
 
