@@ -4,9 +4,6 @@ Coding Standard
 Vertex follows the [Twisted Coding Standard](https://twistedmatrix.com/documents/current/core/development/policy/coding-standard.html).
 Although it has not currently incorporated as a checker, the [Twisted Coding Standard Checker](https://launchpad.net/twistedchecker) would be a useful tool.
 
-The single caveat to the Twisted coding standard is that `_`-separated camel-cased phrases in test method names are allowed, as per the buildbot project.
-This is only to be used for separating out logical parts of the name, such as what is being tested vs a particular variation in input.
-For instance: `test_weDoThis_inCaseA`, `test_weDoThis_inCaseB`
 
 Testing Standard
 ================
