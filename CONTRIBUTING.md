@@ -74,10 +74,11 @@ Finally, a longer description should be added that details the change.
     <Uneditable line re: which branch and pull request are getting merged>
     <Editable second line>
     
-    Reviewer: <names>
-    Fixes: #<issue number>
+    Reviewers <names>
+    Fixes #<issue number>
 
     Long description (as long as you wish)
 
+["Fixes #issue" will close one or more issues](https://help.github.com/articles/closing-issues-via-commit-messages).  Note the lack of colon after the word "Fixes" - if a colon appears after "Fixes", the issue will not be automatically closed.
 
 Once the pull request is merged, if using branches, please delete the branch.
