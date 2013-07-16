@@ -69,17 +69,16 @@ Once a pull request is approved, the big green button should be used to merge.
 In the merge commit, Github determines the top line of the message, and the title of the pull request is the second line, but can be edited.
 Please make sure this second line is meaningful, either by making the pull request title meaningful or by editing the commit message.
 
-Following the second line, the author, reviewers (and a "fixes") should be included, as per the Twisted merge commit messages.  
-Finally, a longer description can be included.
+Following the second line, the reviewers and a "fixes" should be included, as per the Twisted merge commit messages.  
+Finally, a longer description should be added that details the change.
 
     <Uneditable line re: which branch and pull request are getting merged>
     <Editable second line>
     
-    Author: <names>
     Reviewer: <names>
     Fixes: #<issue number>
 
     Long description (as long as you wish)
 
 
-Once the pull request is merged, if using branches, please use the Github UI to delete the branch (since it can be then later restored if necessary).
+Once the pull request is merged, if using branches, please delete the branch.
