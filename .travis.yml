@@ -9,6 +9,7 @@ python:
 
 install:
   - pip install pyflakes
+  - pip install coveralls
   - pip install Twisted>=13.1.0
   - pip install .
 
@@ -18,7 +19,10 @@ script:
   - python -c "from vertex import scripts"
   - python -c "from vertex import test"
   - pyflakes vertex bin prime
-  - trial vertex
+  - coverage run `which trial` vertex
+
+after_success:
+    - coveralls
 
 notifications:
   email: false
