@@ -66,7 +66,7 @@ To pass review, pull requests should:
 In addition:
 
 1. All tests must pass - this is enforced with [Travis-CI](https://travis-ci.org/twisted/vertex)
-1. Code coverage must not decrease - coverage can be viewed at [Coveralls](https://coveralls.io/r/twisted/vertex).
+1. Code coverage must not decrease - this is enforced by (and more details available at) [Coveralls](https://coveralls.io/r/twisted/vertex).
 Although coverage does not say anything about the quality of the tests or the correct behavior of the tests (both of which should be evaluated during review), it provides a minimal baseline.
 
 Once a pull request is approved, the big green button should be used to merge.
