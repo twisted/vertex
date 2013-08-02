@@ -63,6 +63,12 @@ To pass review, pull requests should:
 1. have 100% API docstring coverage for all modified and new code (even if it didn't have docs before)
 1. have prose documentation giving a high-level sense of how an API is meant to be used and what capabilities the library offers. 
 
+In addition:
+
+1. All tests must pass - this is enforced with [Travis-CI](https://travis-ci.org/twisted/vertex)
+1. Code coverage must not decrease - this is enforced by (and more details available at) [Coveralls](https://coveralls.io/r/twisted/vertex).
+Although coverage does not say anything about the quality of the tests or the correct behavior of the tests (both of which should be evaluated during review), it provides a minimal baseline.
+
 Once a pull request is approved, the big green button should be used to merge.
 
 In the merge commit, Github determines the top line of the message, and the title of the pull request is the second line, but can be edited.
