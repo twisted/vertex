@@ -10,15 +10,16 @@ from vertex import q2q
 from vertex.depserv import DependencyService, Conf
 from vertex.q2qadmin import AddUser, NotAllowed
 
+
 class IdentityAdmin(AMP):
 
+    @AddUser.responder
     def command_ADD_USER(self, name, password):
         # all security is transport security
         theDomain = self.transport.getQ2QHost().domain
         self.factory.store.addUser(theDomain, name, password)
         return {}
 
-    command_ADD_USER.command = AddUser
 
 class IdentityAdminFactory:
     def __init__(self, certstore):
