@@ -6,8 +6,7 @@ Tests for the AddUser (AMP Command) responder and client parts of vertex.
 
 from pretend import stub
 
-from twisted.protocols.loopback import loopbackAsync
-from twisted.test.proto_helpers import StringTransport
+from twisted.test.iosim import connect, makeFakeClient, makeFakeServer
 from twisted.trial.unittest import TestCase
 
 from vertex.q2qadmin import AddUser
@@ -49,21 +48,20 @@ class AddUserTests(TestCase):
         admin = IdentityAdmin()
         admin.factory = self.adminFactory
 
-        class StringTransportWithQ2QStuff(StringTransport):
-            def getQ2QAddress(self):
-                return "Q2QAdress"
-
-        admin.makeConnection(StringTransportWithQ2QStuff())
-
         client = UserAdder()
         client.factory = self.clientFactory
 
-        loopbackAsync(client, admin)
+        serverTransport = makeFakeServer(admin)
+        clientTransport = makeFakeClient(client)
+
+        serverTransport.getQ2QHost = lambda: stub(domain='Q2Q Host')
+
+        connect(admin, serverTransport, client, clientTransport)
 
         # upon connection being made, the UserAdder's factory's username and
         # password are added, along with the domain=q2q host, to the
         # IdentityAdmin's factory's store
-        expected = {'domain': 'Q2QAddress',
+        expected = {'domain': 'Q2Q Host',
                     'username': 'q2q username',
                     'password': 'q2q password'}
         self.assertEqual([expected], self.added)
