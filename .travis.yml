@@ -10,6 +10,7 @@ python:
 install:
   - pip install pyflakes
   - pip install coveralls
+  - pip install pretend
   - pip install Twisted>=13.1.0
   - pip install .
 
