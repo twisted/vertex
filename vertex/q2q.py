@@ -42,7 +42,6 @@ from vertex import subproducer, ptcp
 from vertex import endpoint, ivertex
 from vertex.conncache import ConnectionCache
 
-MESSAGE_PROTOCOL = 'q2q-message'
 port = 8788
 
 class ConnectionError(Exception):
@@ -2084,26 +2083,6 @@ class MessageSender(AMP):
 theMessageFactory = protocol.ClientFactory()
 theMessageFactory.protocol = MessageSender
 
-class _MessageChannel(object):
-    """Conceptual curry over source and destination addresses, as well as a namespace.
-
-    Acts as a transport for delivering Q2Q commands between two particular endpoints.
-    """
-
-    def __init__(self, q2qsvc,
-                 fromAddress, toAddress,
-                 namespace):
-        self.q2qsvc = q2qsvc
-        self.fromAddress = fromAddress
-        self.toAddress = toAddress
-        self.namespace = namespace
-
-    def __call__(self, command):
-        return self.q2qsvc.sendMessage(
-            self.fromAddress,
-            self.toAddress,
-            self.namespace, command)
-
 _ConnectionWaiter = namedtuple('_ConnectionWaiter',
                                'From to protocolName protocolFactory isClient')
 
@@ -2534,41 +2513,6 @@ class Q2QService(service.MultiService, protocol.ServerFactory):
         for conn in self.subConnections:
             dl.append(defer.maybeDeferred(conn.transport.loseConnection))
         return defer.DeferredList(dl)
-
-
-    def sendMessage(self, fromAddress, toAddress, namespace, message):
-        """
-        Send a message using the Q2Q-Message protocol to a peer.  This internally
-        uses a connection cache to avoid setting up and tearing down
-        connections too often.
-
-        @param fromAddress: Q2QAddress instance referring to the sender of the
-        message.
-
-        @param toAddress: Q2QAddress instance referring to the receiver of the
-        message.
-
-        @param namespace: str which indicates what juice command namespace the message is in.
-
-        @param message: a juice.Command object.
-        """
-
-
-        return self.connectCachedQ2Q(
-            fromAddress, toAddress, MESSAGE_PROTOCOL, theMessageFactory
-            ).addCallback(message.do, namespace)
-
-
-    def messageChannel(self, fromAddress, toAddress, namespace):
-        """Create a one-arg callable that takes a Command and sends it to .
-        """
-        return _MessageChannel(self, fromAddress, toAddress, namespace)
-
-    def connectCachedQ2Q(self, fromAddress,
-                         toAddress, protocolName, protocolFactory):
-        return self.appConnectionCache.connectCached(
-            endpoint.Q2QEndpoint(self, fromAddress, toAddress, MESSAGE_PROTOCOL),
-            theMessageFactory)
 
 
     def connectQ2Q(self, fromAddress, toAddress, protocolName, protocolFactory,
