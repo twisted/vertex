@@ -8,7 +8,7 @@ Tests for L{vertex.q2qclient}.
 from twisted.trial import unittest
 from twisted.internet.protocol import Factory
 
-from twisted.protocols.amp import Command, AMP, AmpBox
+from twisted.protocols.amp import AMP, AmpBox
 
 from vertex import q2q, q2qclient
 
