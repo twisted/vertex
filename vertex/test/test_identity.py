@@ -8,21 +8,39 @@ from vertex.ivertex import IQ2QUser
 from vertex.q2q import Q2Q, Q2QAddress, Identify, Sign
 
 
+def makeCert(cn):
+    """
+    Create a self-signed certificate with the given common name.
+
+    @param cn: Common Name to use in certificate.
+    @type cn: L{bytes}
+
+    @return: Self-signed certificate.
+    @rtype: L{Certificate<twisted.internet.ssl.Certificate>}
+    """
+    sharedDN = DN(CN=cn)
+    key = KeyPair.generate()
+    cr = key.certificateRequest(sharedDN)
+    sscrd = key.signCertificateRequest(sharedDN, cr, lambda dn: True, 1)
+    return key.newCertificate(sscrd)
+
+
+def makeCertRequest(cn):
+    """
+    Create a certificate request with the given common name.
+
+    @param cn: Common Name to use in certificate request.
+    @type cn: L{bytes}
+
+    @return: Certificate request.
+    @rtype: L{CertificateRequest}
+    """
+    key = KeyPair.generate()
+    return key.certificateRequest(DN(CN=cn))
+
+
 
 class IdentityTests(unittest.TestCase):
-
-    def makeCert(self, cn):
-        sharedDN = DN(CN=cn)
-        key = KeyPair.generate()
-        cr = key.certificateRequest(sharedDN)
-        sscrd = key.signCertificateRequest(sharedDN, cr, lambda dn: True, 1)
-        return key.newCertificate(sscrd)
-
-
-    def makeCertRequest(self, cn):
-        key = KeyPair.generate()
-        return key.certificateRequest(DN(CN=cn))
-
 
     def test_identify(self):
         """
@@ -30,7 +48,7 @@ class IdentityTests(unittest.TestCase):
         stored for the requested domain.
         """
         target = "example.com"
-        fakeCert = self.makeCert("fake certificate")
+        fakeCert = makeCert("fake certificate")
 
         class FakeStorage(object):
             def getPrivateCertificate(cs, subject):
@@ -55,7 +73,7 @@ class IdentityTests(unittest.TestCase):
         """
         Vertex nodes with no portal will not sign cert requests.
         """
-        cr = CertificateRequest.load(self.makeCertRequest("example.com"))
+        cr = CertificateRequest.load(makeCertRequest("example.com"))
         class FakeService(object):
             portal = None
 
@@ -80,7 +98,7 @@ class IdentityTests(unittest.TestCase):
         passwd = 'hunter2'
 
         issuerName = "fake certificate"
-        domainCert = self.makeCert(issuerName)
+        domainCert = makeCert(issuerName)
 
         class FakeAvatar(object):
             def signCertificateRequest(fa, certificateRequest, hostcert,
@@ -96,7 +114,7 @@ class IdentityTests(unittest.TestCase):
             def genSerial(cs, domain):
                 return 1
 
-        cr = CertificateRequest.load(self.makeCertRequest(user))
+        cr = CertificateRequest.load(makeCertRequest(user))
         class FakePortal(object):
             def login(fp, creds, proto, iface):
                 self.assertEqual(iface, IQ2QUser)
