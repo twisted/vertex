@@ -40,14 +40,13 @@ class IdentityTests(unittest.TestCase):
 
         box = Identify.makeArguments({'subject': Q2QAddress(target)}, None)
         d = q.locateResponder("identify")(box)
-        def _check(responseBox):
-            response = amp._stringsToObjects(responseBox, Identify.response,
-                                             None)
-            self.assertEqual(response, {'certificate': fakeCert})
-            self.assertFalse(hasattr(response['certificate'], 'privateKey'))
-        return d.addCallback(_check)
+        responseBox = self.successResultOf(d)
+        response = amp._stringsToObjects(responseBox, Identify.response,
+                                         None)
+        self.assertEqual(response, {'certificate': fakeCert})
+        self.assertFalse(hasattr(response['certificate'], 'privateKey'))
 
-    def test_cant_sign(self):
+    def test_cannotSign(self):
         """
         Vertex nodes with no portal will not sign cert requests.
         """
@@ -110,9 +109,8 @@ class IdentityTests(unittest.TestCase):
                                   'password': passwd}, None)
 
         d = q.locateResponder("sign")(box)
-        def _check(responseBox):
-            response = amp._stringsToObjects(responseBox, Sign.response,
-                                             None)
-            self.assertEqual(response['certificate'].getIssuer().commonName,
-                             issuerName)
-        return d.addCallback(_check)
+        responseBox = self.successResultOf(d)
+        response = amp._stringsToObjects(responseBox, Sign.response,
+                                         None)
+        self.assertEqual(response['certificate'].getIssuer().commonName,
+                         issuerName)
