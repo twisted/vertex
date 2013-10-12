@@ -1,3 +1,10 @@
+# Copyright (c) Twisted Matrix Laboratories.
+# See LICENSE for details.
+
+"""
+Tests for I{AMP} commands related to identity.
+"""
+
 from twisted.trial import unittest
 
 from twisted.protocols import amp
@@ -41,6 +48,9 @@ def makeCertRequest(cn):
 
 
 class IdentityTests(unittest.TestCase):
+    """
+    Tests for L{Identify}.
+    """
 
     def test_identify(self):
         """
@@ -68,6 +78,12 @@ class IdentityTests(unittest.TestCase):
         self.assertEqual(response, {'certificate': fakeCert})
         self.assertFalse(hasattr(response['certificate'], 'privateKey'))
 
+
+
+class SignTests(unittest.TestCase):
+    """
+    Tests for L{Sign}.
+    """
 
     def test_cannotSign(self):
         """
