@@ -7,6 +7,8 @@ from twisted.internet.ssl import DN, KeyPair, CertificateRequest
 from vertex.ivertex import IQ2QUser
 from vertex.q2q import Q2Q, Q2QAddress, Identify, Sign
 
+
+
 class IdentityTests(unittest.TestCase):
 
     def makeCert(self, cn):
@@ -16,9 +18,11 @@ class IdentityTests(unittest.TestCase):
         sscrd = key.signCertificateRequest(sharedDN, cr, lambda dn: True, 1)
         return key.newCertificate(sscrd)
 
+
     def makeCertRequest(self, cn):
         key = KeyPair.generate()
         return key.certificateRequest(DN(CN=cn))
+
 
     def test_identify(self):
         """
@@ -46,6 +50,7 @@ class IdentityTests(unittest.TestCase):
         self.assertEqual(response, {'certificate': fakeCert})
         self.assertFalse(hasattr(response['certificate'], 'privateKey'))
 
+
     def test_cannotSign(self):
         """
         Vertex nodes with no portal will not sign cert requests.
@@ -62,6 +67,7 @@ class IdentityTests(unittest.TestCase):
 
         d = q.locateResponder("sign")(box)
         return self.assertFailure(d, amp.RemoteAmpError)
+
 
     def test_sign(self):
         """
