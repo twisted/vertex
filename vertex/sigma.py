@@ -234,6 +234,20 @@ class SigmaProtocol(AMP):
                 PROTOCOL_NAME), None, self)
         self.transport.registerProducer(self, 0)
 
+
+    def connectionLost(self, reason):
+        """
+        Inform the associated L{conncache.ConnectionCache} that this
+        protocol has been disconnected.
+        """
+        self.nexus.conns.connectionLostForKey((endpoint.Q2QEndpoint(
+                self.nexus.svc,
+                self.nexus.addr,
+                self.transport.getQ2QPeer(),
+                PROTOCOL_NAME), None))
+        AMP.connectionLost(self, reason)
+
+
     def stopProducing(self):
         ""
 
@@ -545,7 +559,6 @@ class Transload:
                 self._connectedPeer, peer)
 
     def _connectedPeer(self, proto, peer):
-        knowledge = self.peers[peer]
         proto.get(self.name, self.mask)
 
     def peerNeedsData(self, peer):

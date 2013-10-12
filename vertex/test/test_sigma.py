@@ -1,25 +1,24 @@
 # Copyright 2005 Divmod, Inc.  See LICENSE file for details
 
-from cStringIO import StringIO
-
-from twisted.internet.protocol import FileWrapper
 from twisted.internet import defer
 from twisted.python.failure import Failure
 from twisted.python.filepath import FilePath
+from twisted.internet.error import ConnectionDone
 
 from twisted.trial import unittest
 
 from twisted.test.iosim import connectedServerAndClient, FakeTransport
 
 from vertex.q2q import Q2QAddress
-from vertex import sigma
+from vertex import sigma, conncache
 
 from vertex.test.mock_data import data as TEST_DATA
+from vertex.test.test_conncache import DisconnectingTransport
 
 class FakeQ2QTransport(FakeTransport):
 
-    def __init__(self, q2qhost, q2qpeer):
-        FakeTransport.__init__(self)
+    def __init__(self, protocol, isServer, q2qhost, q2qpeer):
+        FakeTransport.__init__(self, protocol, isServer)
         self.q2qhost = q2qhost
         self.q2qpeer = q2qpeer
 
@@ -100,15 +99,11 @@ class FakeQ2QService:
             return defer.fail(reason)
         else:
             def makeFakeClient(c):
-                ft = FakeQ2QTransport(fromAddress, toAddress)
-                ft.isServer = False
-                ft.protocol = c
+                ft = FakeQ2QTransport(c, False, fromAddress, toAddress)
                 return ft
 
             def makeFakeServer(s):
-                ft = FakeQ2QTransport(toAddress, fromAddress)
-                ft.isServer = True
-                ft.protocol = s
+                ft = FakeQ2QTransport(s, True, toAddress, fromAddress)
                 return ft
 
             client, server, pump = connectedServerAndClient(
@@ -203,6 +198,37 @@ class BasicTransferTest(TestBase):
             self.assertEquals(rfile.open().read(),
                               TEST_DATA,
                               "file value mismatch")
+
+
+class TestSigmaConnectionCache(unittest.TestCase):
+    """
+    Tests for the interaction of L{sigma.SigmaProtocol} and
+    L{conncache.ConnectionCache}.
+    """
+
+    def test_connectionLost_unregistersFromConnectionCache(self):
+        """
+        L{sigma.SigmaProtocol.connectionLost} notifies the connection
+        cache that the connection is lost.
+        """
+        cache = conncache.ConnectionCache()
+
+        class FakeNexus(object):
+            conns = cache
+            addr = object()
+            svc = object()
+
+        protocol = sigma.SigmaProtocol(FakeNexus())
+        transport = DisconnectingTransport()
+        q2qPeer = object()
+        transport.getQ2QPeer = lambda: q2qPeer
+
+        protocol.makeConnection(transport)
+        d = cache.shutdown()
+        transport.loseConnectionDeferred.callback(None)
+        self.assertNoResult(d)
+        protocol.connectionLost(Failure(ConnectionDone))
+        self.successResultOf(d)
 
 
 def childrenOf(x):

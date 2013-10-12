@@ -2,17 +2,27 @@ language: python
 python:
     - '2.7'
 
-# Epsilon's setup.py does not have Twisted as an install_requires, so
-# including it in requirements.txt fails
+# TODO: Twisted has to be installed before vertex is installed, even though
+# it is in the install_requires and setup_requires, because without Twisted
+# setup.py can't even import without Twisted being installed (because vertex
+# version requires twisted version)
+
 install:
-  - pip install pyflakes --use-mirrors
-  - pip install -r requirements.txt --use-mirrors
-  - pip install Epsilon==0.6.0
+  - pip install pyflakes
+  - pip install coveralls
+  - pip install Twisted>=13.1.0
+  - pip install .
 
 # no pep8, since vertex uses twisted pep8
 script:
+  - python -c "import vertex"
+  - python -c "from vertex import scripts"
+  - python -c "from vertex import test"
   - pyflakes vertex bin prime
-  - trial vertex
+  - coverage run `which trial` vertex
+
+after_success:
+    - coveralls
 
 notifications:
   email: false
