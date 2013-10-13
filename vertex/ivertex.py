@@ -87,22 +87,3 @@ class ICertificateStorage(Interface):
     def addPrivateCertificate(self, domainName, existingCertificate=None):
         """
         """
-
-class IOfferUp(Interface):
-    """
-    Sharing control database storage.
-    """
-
-class IPlugin(Interface):
-    """
-    """
-
-class ITestPlugin(Interface):
-    """
-    Dummy plug-in interface for unit testing.
-    """
-
-class ITestPlugin2(Interface):
-    """
-    Dummy plug-in interface for unit testing.
-    """
