@@ -41,23 +41,12 @@ from twisted.protocols.amp import _objectsToStrings
 from vertex import subproducer, ptcp
 from vertex import endpoint, ivertex
 from vertex.conncache import ConnectionCache
+from vertex.authority import DefaultCertificateStore
+from vertex.errors import (
+        ConnectionError, AttemptsFailed, NoAttemptsMade,
+        VerifyError, BadCertificateRequest)
 
 port = 8788
-
-class ConnectionError(Exception):
-    pass
-
-class AttemptsFailed(ConnectionError):
-    pass
-
-class NoAttemptsMade(ConnectionError):
-    pass
-
-class VerifyError(Exception):
-    pass
-
-class BadCertificateRequest(VerifyError):
-    pass
 
 class IgnoreConnectionFailed(protocol.ClientFactory):
     def __init__(self, realFactory):

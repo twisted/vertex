@@ -24,6 +24,7 @@ from twisted.internet.interfaces import IResolverSimple
 from twisted.protocols.amp import UnknownRemoteError, QuitBox, Command, AMP
 
 from vertex import q2q
+from vertex.errors import BadCertificateRequest
 
 
 def noResources(*a):
@@ -594,7 +595,7 @@ class ConnectionTestMixin:
         def unexpectedSuccess(result):
             self.fail("Expected BadCertificateRequest, got %r" % (result,))
         def expectedFailure(err):
-            err.trap(q2q.BadCertificateRequest)
+            err.trap(BadCertificateRequest)
         d.addCallbacks(unexpectedSuccess, expectedFailure)
         return d
 

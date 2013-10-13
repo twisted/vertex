@@ -21,15 +21,13 @@ from vertex import q2q
 from vertex import bits
 from vertex import conncache
 from vertex import endpoint
+from vertex.errors import VerifyError
 
 __metaclass__ = type
 
 # protocol below
 
 PROTOCOL_NAME = 'sigma'
-
-class VerifyError(Exception):
-    pass
 
 class BitArrayArgument(String):
     def toString(self, arr):
