@@ -14,6 +14,8 @@ from twisted.internet.ssl import DN, KeyPair, CertificateRequest
 from vertex.ivertex import IQ2QUser
 from vertex.q2q import Q2Q, Q2QAddress, Identify, Sign
 
+from vertex.test.amphelpers import callResponder
+
 
 def makeCert(cn):
     """
@@ -70,11 +72,8 @@ class IdentityTests(unittest.TestCase):
         q = Q2Q()
         q.service = FakeService()
 
-        box = Identify.makeArguments({'subject': Q2QAddress(target)}, None)
-        d = q.locateResponder("identify")(box)
-        responseBox = self.successResultOf(d)
-        response = amp._stringsToObjects(responseBox, Identify.response,
-                                         None)
+        d = callResponder(q, Identify, subject=Q2QAddress(target))
+        response = self.successResultOf(d)
         self.assertEqual(response, {'certificate': fakeCert})
         self.assertFalse(hasattr(response['certificate'], 'privateKey'))
 
@@ -96,11 +95,10 @@ class SignTests(unittest.TestCase):
         q = Q2Q()
         q.service = FakeService()
 
-        box = Sign.makeArguments({'certificate_request': cr,
-                                  'password': 'hunter2'}, None)
-
-        d = q.locateResponder("sign")(box)
-        return self.assertFailure(d, amp.RemoteAmpError)
+        d = callResponder(q, Sign,
+                          certificate_request=cr,
+                          password='hunter2')
+        self.failureResultOf(d, amp.RemoteAmpError)
 
 
     def test_sign(self):
@@ -145,12 +143,9 @@ class SignTests(unittest.TestCase):
         q = Q2Q()
         q.service = FakeService()
 
-        box = Sign.makeArguments({'certificate_request': cr,
-                                  'password': passwd}, None)
-
-        d = q.locateResponder("sign")(box)
-        responseBox = self.successResultOf(d)
-        response = amp._stringsToObjects(responseBox, Sign.response,
-                                         None)
+        d = callResponder(q, Sign,
+                          certificate_request=cr,
+                          password=passwd)
+        response = self.successResultOf(d)
         self.assertEqual(response['certificate'].getIssuer().commonName,
                          issuerName)
