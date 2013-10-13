@@ -9,6 +9,7 @@ from twisted.protocols.amp import AMP, Box, parseString
 from vertex import q2q
 from vertex.depserv import DependencyService, Conf
 from vertex.q2qadmin import AddUser, NotAllowed
+from vertex.authority import DirectoryCertificateStore
 
 class IdentityAdmin(AMP):
 
@@ -58,21 +59,21 @@ class _usermap:
                 data = parseString(open(filepath).read())[0]
                 return data['password'].decode('hex')
 
-class DirectoryCertificateAndUserStore(q2q.DirectoryCertificateStore):
+class DirectoryCertificateAndUserStore(DirectoryCertificateStore):
     def __init__(self, filepath):
-        q2q.DirectoryCertificateStore.__init__(self, filepath)
+        DirectoryCertificateStore.__init__(self, filepath)
         self.users = _usermap(os.path.join(filepath, "users"))
 
     def getPrivateCertificate(self, domain):
         try:
-            return q2q.DirectoryCertificateStore.getPrivateCertificate(self, domain)
+            return DirectoryCertificateStore.getPrivateCertificate(self, domain)
         except KeyError:
             if len(self.localStore.keys()) > 10:
                 # avoid DoS; nobody is going to need autocreated certs for more
                 # than 10 domains
                 raise
             self.addPrivateCertificate(domain)
-        return q2q.DirectoryCertificateStore.getPrivateCertificate(self, domain)
+        return DirectoryCertificateStore.getPrivateCertificate(self, domain)
 
 class StandaloneQ2Q(DependencyService):
     def setup_Q2Q(self, path,

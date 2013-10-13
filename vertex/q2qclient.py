@@ -16,6 +16,7 @@ from twisted.internet import protocol
 from twisted.internet.task import LoopingCall
 from twisted.internet import error
 from vertex.q2qadmin import AddUser
+from vertex.authority import DirectoryCertificateStore
 
 class Q2QAuthorize(Options):
     def parseArgs(self, who, password=None):
@@ -152,9 +153,9 @@ class FileReceiverFactory(protocol.Factory):
     protocol = FileReceiver
 
 
-class ClientCertificateStore(q2q.DirectoryCertificateStore):
+class ClientCertificateStore(DirectoryCertificateStore):
     def __init__(self, filepath):
-        q2q.DirectoryCertificateStore.__init__(self, os.path.expanduser(filepath))
+        DirectoryCertificateStore.__init__(self, os.path.expanduser(filepath))
 
 
 class ClientQ2QService(q2q.Q2QService):
