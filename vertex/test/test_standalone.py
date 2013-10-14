@@ -1,22 +1,22 @@
 # Copyright 2013 Twisted Matrix Laboratories.  See LICENSE file for details
 
 """
-Tests for the AddUser (AMP Command) responder and client parts of vertex.
+Tests for L{vertex.q2qstandalone}
 """
 
 from pretend import stub
 
+from twisted.protocols.amp import AMP
 from twisted.test.iosim import connect, makeFakeClient, makeFakeServer
 from twisted.trial.unittest import TestCase
 
 from vertex.q2qadmin import AddUser
 from vertex.q2qstandalone import IdentityAdmin
-from vertex.q2qclient import UserAdder
 
 
-class AddUserTests(TestCase):
+class AddUserAdminTests(TestCase):
     """
-    Tests for the AMP AddUser command client and responder
+    Tests that IdentityAdmin can successfully add a user
     """
     def setUp(self):
         self.added = []
@@ -28,9 +28,6 @@ class AddUserTests(TestCase):
 
         store = stub(addUser=addUser)
         self.adminFactory = stub(store=store)
-
-        self.clientFactory = stub(name='q2q username',
-                                  password='q2q password')
 
     def test_IdentityAdmin_responder_adds_user(self):
         """
@@ -48,20 +45,22 @@ class AddUserTests(TestCase):
         admin = IdentityAdmin()
         admin.factory = self.adminFactory
 
-        client = UserAdder()
-        client.factory = self.clientFactory
-
         serverTransport = makeFakeServer(admin)
-        clientTransport = makeFakeClient(client)
-
         serverTransport.getQ2QHost = lambda: stub(domain='Q2Q Host')
 
-        connect(admin, serverTransport, client, clientTransport)
+        client = AMP()
+        pump = connect(admin, serverTransport, client, makeFakeClient(client))
 
-        # upon connection being made, the UserAdder's factory's username and
-        # password are added, along with the domain=q2q host, to the
-        # IdentityAdmin's factory's store
+        d = client.callRemote(AddUser, name='q2q username',
+                              password='q2q password')
+        pump.flush()
+
+        # the username and password are added, along with the domain=q2q
+        # host, to the IdentityAdmin's factory's store
         expected = {'domain': 'Q2Q Host',
                     'username': 'q2q username',
                     'password': 'q2q password'}
         self.assertEqual([expected], self.added)
+
+        # the server responds with {}
+        self.assertEqual({}, self.successResultOf(d))

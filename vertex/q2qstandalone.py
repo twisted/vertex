@@ -1,4 +1,4 @@
-# -*- test-case-name:vertex.test.test_amp -*-
+# -*- test-case-name:vertex.test.test_standalone -*-
 
 # Copyright 2005 Divmod, Inc.  See LICENSE file for details
 
