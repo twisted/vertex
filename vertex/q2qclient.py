@@ -11,6 +11,7 @@ from vertex import q2q, sigma
 from twisted.python.usage import Options
 
 from twisted.python import log
+from twisted.python.failure import Failure
 from twisted.internet import reactor
 from twisted.internet import protocol
 from twisted.internet.task import LoopingCall
@@ -307,17 +308,6 @@ class Q2QSigma(Options):
             nex.push(sharefile, sharename, sharepeers)
         self.parent.start()
 
-class UserAdder(AMP):
-    def connectionMade(self):
-        self.d = AddUser(name=self.factory.name,
-                         password=self.factory.password).do(self)
-
-
-class UserAdderFactory(protocol.ClientFactory):
-    protocol = UserAdder
-
-    def __init__(self, name, password):
-        self.name, self.password = name, password
 
 
 def enregister(svc, newAddress, password):
@@ -330,15 +320,19 @@ def enregister(svc, newAddress, password):
 
     @param password: a shared secret (str)
     """
-    def trapit(x):
-        x.trap(error.ConnectionDone)
     return svc.connectQ2Q(q2q.Q2QAddress("",""),
                        q2q.Q2QAddress(newAddress.domain, "accounts"),
                        'identity-admin',
-                       UserAdderFactory(newAddress.resource, password)
+                       protocol.ClientFactory.forProtocol(AMP)
                        ).addCallback(
-            lambda proto: proto.d).addErrback(
-            trapit)
+                           AMP.callRemote,
+                           AddUser,
+                           name=newAddress.resource,
+                           password=password
+                       ).addErrback(
+                           Failure.trap,
+                           error.ConnectionDone
+                       )
 
 class Q2QRegister(Options):
     synopsis = "<new Q2Q address> <password>"
