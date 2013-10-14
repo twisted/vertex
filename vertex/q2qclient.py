@@ -1,5 +1,3 @@
-# -*- test-case-name:vertex.test.test_amp -*-
-
 # Copyright 2005 Divmod, Inc.  See LICENSE file for details
 
 import os
@@ -311,9 +309,8 @@ class Q2QSigma(Options):
 
 class UserAdder(AMP):
     def connectionMade(self):
-        self.d = self.callRemote(
-            AddUser, name=self.factory.name,
-            password=self.factory.password)
+        self.d = AddUser(name=self.factory.name,
+                         password=self.factory.password).do(self)
 
 
 class UserAdderFactory(protocol.ClientFactory):
