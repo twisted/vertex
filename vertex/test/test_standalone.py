@@ -4,7 +4,7 @@
 Tests for L{vertex.q2qstandalone}
 """
 
-from pretend import stub
+from pretend import call_recorder, call, stub
 
 from twisted.protocols.amp import AMP
 from twisted.test.iosim import connect, makeFakeClient, makeFakeServer
@@ -19,14 +19,8 @@ class AddUserAdminTests(TestCase):
     Tests that IdentityAdmin can successfully add a user
     """
     def setUp(self):
-        self.added = []
-
-        def addUser(domain, username, password):
-            self.added.append({'domain': domain,
-                               'username': username,
-                               'password': password})
-
-        store = stub(addUser=addUser)
+        self.addUser = call_recorder(lambda *args, **kwargs: {})
+        store = stub(addUser=self.addUser)
         self.adminFactory = stub(store=store)
 
     def test_IdentityAdmin_responder_adds_user(self):
@@ -57,10 +51,8 @@ class AddUserAdminTests(TestCase):
 
         # the username and password are added, along with the domain=q2q
         # host, to the IdentityAdmin's factory's store
-        expected = {'domain': 'Q2Q Host',
-                    'username': 'q2q username',
-                    'password': 'q2q password'}
-        self.assertEqual([expected], self.added)
+        self.assertEqual([call('Q2Q Host', 'q2q username', 'q2q password')],
+                         self.addUser.calls)
 
         # the server responds with {}
         self.assertEqual({}, self.successResultOf(d))
