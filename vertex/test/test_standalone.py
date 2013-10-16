@@ -10,6 +10,7 @@ from twisted.protocols.amp import AMP
 from twisted.test.iosim import connect, makeFakeClient, makeFakeServer
 from twisted.trial.unittest import TestCase
 
+from vertex.q2q import Q2QAddress
 from vertex.q2qadmin import AddUser
 from vertex.q2qstandalone import IdentityAdmin
 
@@ -40,7 +41,7 @@ class AddUserAdminTests(TestCase):
         admin.factory = self.adminFactory
 
         serverTransport = makeFakeServer(admin)
-        serverTransport.getQ2QHost = lambda: stub(domain='Q2Q Host')
+        serverTransport.getQ2QHost = lambda: Q2QAddress('Q2Q Host')
 
         client = AMP()
         pump = connect(admin, serverTransport, client, makeFakeClient(client))
