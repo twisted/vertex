@@ -6,3 +6,5 @@ build
 
 _trial_temp*
 .coverage
+
+.q2q-data
