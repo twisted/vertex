@@ -553,12 +553,12 @@ class ConnectionTestMixin:
             def report(result):
                 return result
             self.serverService2.connectQ2Q(self.fromAddress,
-                                          self.toAddress,
-                                          'pony',
-                                          OneTrickPonyClientFactory(ponged),
-                                          selfSignedLie,
-                                          fakeFromDomain=self.toDomain).addErrback(
-                lambda e: e.trap(q2q.VerifyError)).addBoth(report)
+                                           self.toAddress,
+                                           'pony',
+                                           OneTrickPonyClientFactory(ponged),
+                                           usePrivateCertificate=selfSignedLie,
+                                           fakeFromDomain=self.toDomain).addErrback(
+                lambda e: e.trap(q2q.VerifyError))
 
             return self.assertFailure(ponged, q2q.VerifyError)
         return x.addCallback(actualTest)

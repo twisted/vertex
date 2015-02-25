@@ -2608,19 +2608,40 @@ class Q2QService(service.MultiService, protocol.ServerFactory):
             port, usePrivateCertificate).addCallback(
             onSecureConnection).addErrback(onSecureConnectionFailure)
 
+
     def getSecureConnection(self, fromAddress, toAddress, port=port,
-                            failIfNoCertificate=False,
                             usePrivateCertificate=None,
                             authorize=True):
         """
-        Get a secure connection between two entities by connecting to the
-        domain part of toAddress
+        Establish or retrieven an already-established L{Q2Q}-protocol
+        connection from C{fromAddress} to I{the q2q proxy provider} for
+        C{toAddress}; i.e. the entity responsible for the I{domain party only}
+        of C{toAddress}.
 
-        (This really shouldn't be _entirely_ public, because it's slightly
-        misleading: you pass in fully qualified addresses but the connection
-        chops off the resource half of the "to" address, giving you a
-        connection to their host rather than their actual client, as this is a
-        necessary step to look up where their client *is*.)
+        The connection is "from" C{fromAddress} in the sense that it will use a
+        certificate and private key associated with that address to
+        authenticate itself.
+
+        For example, if we want to connect from C{foo@bar.com} to
+        C{baz@qux.com}, this will establish a connection to C{qux.com}.
+
+        @param fromAddress: The address of the party represented by the local
+            host.
+        @type fromAddress: L{Q2QAddress}
+
+        @param toAddress: The address of the party whose proxy we are trying to
+            connect to.  The domain part of this address is the DNS name to
+            connect to, and also the source (in our local certificate store, or
+            via a TOFU DNS lookup) of the certificate authority to use to
+            verify the connection.
+        @type toAddress: L{Q2QAddress}
+
+        @param port: The TCP port number on which to make the outgoing
+            connection.
+        @type port: L{int}
+
+        @return: A L{Deferred} firing with a connected L{Q2Q} where the peer is
+            the I{domain part} of the given C{toAddress}.
         """
 
         # secure connections using users as clients will have to be established
