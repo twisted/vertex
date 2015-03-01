@@ -929,7 +929,10 @@ class Q2Q(AMP, subproducer.SuperProducer):
         """
         Implementation of L{Identify}.
         """
-        ourCA = self.service.certificateStorage.getPrivateCertificate(str(subject))
+        ourPrivateCert = self.service.certificateStorage.getPrivateCertificate(
+            str(subject)
+        )
+        ourCA = Certificate(ourPrivateCert.original)
         return dict(certificate=ourCA)
     Identify.responder(_identify)
 
