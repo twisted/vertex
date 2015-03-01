@@ -1992,7 +1992,6 @@ class DefaultCertificateStore:
         @return: a PrivateCertificate instance, e.g. a certificate including a
         private key, for 'domainName'.
         """
-        print(self.localStore)
         return self.localStore[domainName]
 
 
