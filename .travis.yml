@@ -2,16 +2,10 @@ language: python
 python:
     - '2.7'
 
-# TODO: Twisted has to be installed before vertex is installed, even though
-# it is in the install_requires and setup_requires, because without Twisted
-# setup.py can't even import without Twisted being installed (because vertex
-# version requires twisted version)
-
 install:
   - pip install pyflakes
   - pip install coveralls
   - pip install pretend
-  - pip install Twisted>=13.1.0
   - pip install .
 
 # no pep8, since vertex uses twisted pep8
