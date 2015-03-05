@@ -1,3 +1,8 @@
+0.3.1 (2015-03-05):
+  - Switch to setuptools; this should resolve issues with Vertex being
+    installed through pip, particularly as a dependency of something else.
+  - Numerous other small fixes and cleanups.
+
 0.3.0 (2009-11-25):
   - Remove use of deprecated Twisted APIs from the test suite and improve
     some error handling as a necessary consequence.
