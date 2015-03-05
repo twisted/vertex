@@ -34,31 +34,43 @@ class FakeConnectTCP:
 
     def __init__(self, connectTCP):
         self._connectTCP = connectTCP
-        self.hostPortToHostPort = {}
-        self.hostToLocalHost = {}
+        self._hostToFakeIP = {}
+        self._fakeIPToReal = {}
         self.counter = 1
 
     def addHostPort(self, hostname, fakePortNumber, realPortNumber):
-        if hostname in self.hostToLocalHost:
-            localIP = self.hostToLocalHost[hostname]
-        else:
-            localIP = '127.0.0.%d' % (self.counter,)
-            self.counter += 1
-            self.hostToLocalHost[hostname] = localIP
+        fakeIP = '0.%d.%d.%d' % ((self.counter,) * 3)
+        localIP = '127.0.0.1'
+        self.counter += 1
+        self._hostToFakeIP[hostname] = fakeIP
+        self._fakeIPToReal[(fakeIP, fakePortNumber)] = (
+            localIP, realPortNumber)
 
-        self.hostPortToHostPort[(localIP, fakePortNumber)] = (localIP, realPortNumber)
-        self.hostPortToHostPort[(hostname, fakePortNumber)] = (hostname, realPortNumber)
+
+    def _translateAddress(self, host, port):
+        """
+        Translate a potentially fake host and port into a real host and port.
+        """
+        if host in self._hostToFakeIP:
+            host = self._hostToFakeIP[host]
+        if (host, port) in self._fakeIPToReal:
+            return self._fakeIPToReal[(host, port)]
+        # this happens because we aren't intermediating the transport itself,
+        # and q2q is determining what IPs and ports to connect to via
+        # transport.getHost().port.  this should be fixed by getting rid of
+        # this fixture entirely and going with proto_helpers...
+        return host, port
+
 
     def connectTCP(self, host, port, *args, **kw):
-        localhost, localport = self.hostPortToHostPort.get((host,port), (host, port))
+        localhost, localport = self._translateAddress(host, port)
         return self._connectTCP(localhost, localport, *args, **kw)
 
-    def getHostSync(self,name):
-        result = self.hostToLocalHost[name]
-        return result
-
     def getHostByName(self, name, timeout):
-        return defer.maybeDeferred(self.getHostSync, name)
+        def _getHostSync(name):
+            result = self._hostToFakeIP[name]
+            return result
+        return defer.maybeDeferred(_getHostSync, name)
 
 def runOneDeferred(d):
     L = []
@@ -297,7 +309,7 @@ class Q2QConnectionTestCase(unittest.TestCase):
     fromIP = '127.0.0.1'
     spoofedDomain = 'spoofed.domain.example.com'
     toDomain = 'destination.domain.example.org'
-    toIP = '127.0.0.2'
+    toIP = '127.0.0.1'
 
     userReverseDNS = 'i.watch.too.much.tv'
     inboundTCPPortnum = 0
@@ -386,9 +398,9 @@ class ConnectionTestMixin:
     def testConnectWithIntroduction(self):
         ponged = defer.Deferred()
         self.serverService2.connectQ2Q(self.fromAddress,
-                                      self.toAddress,
-                                      'pony',
-                                      OneTrickPonyClientFactory(ponged))
+                                       self.toAddress,
+                                       'pony',
+                                       OneTrickPonyClientFactory(ponged))
         return ponged.addCallback(lambda answerBox: self.failUnless('tricked' in answerBox))
 
     def addClientService(self, toAddress, secret, serverService):
@@ -551,12 +563,14 @@ class ConnectionTestMixin:
                 DistinguishedName(commonName=self.fromDomain), req, 12345)
             selfSignedLie = PrivateCertificate.fromCertificateAndKeyPair(
                 sreq, signer)
+            def report(result):
+                return result
             self.serverService2.connectQ2Q(self.fromAddress,
-                                          self.toAddress,
-                                          'pony',
-                                          OneTrickPonyClientFactory(ponged),
-                                          selfSignedLie,
-                                          fakeFromDomain=self.toDomain).addErrback(
+                                           self.toAddress,
+                                           'pony',
+                                           OneTrickPonyClientFactory(ponged),
+                                           usePrivateCertificate=selfSignedLie,
+                                           fakeFromDomain=self.toDomain).addErrback(
                 lambda e: e.trap(q2q.VerifyError))
 
             return self.assertFailure(ponged, q2q.VerifyError)
@@ -587,7 +601,8 @@ class ConnectionTestMixin:
             return D.addCallback(_1)
 
         d = self.serverService2.getSecureConnection(
-            self.fromAddress, self.fromAddress.domainAddress(), authorize=False,
+            self.fromAddress, self.fromAddress.domainAddress(),
+            authorize=False,
             usePrivateCertificate=fakecert,
             ).addCallback(_2)
 
