@@ -1,14 +1,16 @@
-from setuptools import setup
+from setuptools import setup, find_packages
+import re
 
-from vertex import version
+versionPattern = re.compile(r"""^__version__ = ['"](.*?)['"]$""", re.M)
+with open("vertex/_version.py", "rt") as f:
+    version = versionPattern.search(f.read()).group(1)
 
 setup(
     name="Vertex",
-    version=version.short(),
+    version=version,
     maintainer="Twisted Matrix Laboratories",
     maintainer_email="vertex-dev@twistedmatrix.com",
     url="https://github.com/twisted/vertex",
-    packages=["vertex", "vertex.scripts", "vertex.test"],
     scripts=["bin/gvertex", "bin/vertex"],
     install_requires=['Twisted>=13.1.0', 'pyOpenSSL>=0.13'],
     license="MIT",
@@ -31,4 +33,6 @@ setup(
         "Topic :: Internet :: Name Service (DNS)",
         "Topic :: Software Development :: Libraries :: Python Modules",
     ],
-)
+    packages=find_packages() + ['prime.plugins'],
+    include_package_data=True,
+    )
