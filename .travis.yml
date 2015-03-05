@@ -1,4 +1,11 @@
 language: python
+sudo: false
+cache:
+  directories:
+    - $HOME/.cache/pip
+branches:
+  only:
+    - master
 python:
     - '2.7'
 
@@ -23,7 +30,12 @@ script:
   - coverage run `which trial` vertex
 
 after_success:
-    - coveralls
+  - coveralls
 
 notifications:
   email: false
+  irc:
+     channels: "chat.freenode.net#divmod"
+     template:
+       - "%{repository}@%{branch} - %{author}: %{message} (%{build_url})"
+     use_notice: true
