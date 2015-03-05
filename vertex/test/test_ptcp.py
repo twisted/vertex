@@ -106,8 +106,8 @@ class ConnectedPTCPMixin:
     def tearDown(self):
         td = []
 
-        for ptcp in (self.serverTransport, self.clientTransport):
-            td.append(ptcp.waitForAllConnectionsToClose())
+        for ptcpTransport in (self.serverTransport, self.clientTransport):
+            td.append(ptcpTransport.waitForAllConnectionsToClose())
         d = defer.DeferredList(td)
         return d
 
