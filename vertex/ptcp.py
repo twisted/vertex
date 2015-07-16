@@ -665,10 +665,26 @@ class PTCPConnection(object):
     def currentAckNum(self):
         return (self.nextRecvSeqNum + self.peerSendISN) % (2**32)
 
+    _ackTimer = None
+    def ackSoon(self):
+        """
+        Emit an acknowledgement packet soon.
+        """
+        if self._ackTimer is None:
+            def originateAck():
+                self._ackTimer = None
+                self.originate(ack=True)
+            self._ackTimer = reactor.callLater(0.1, originateAck)
+        else:
+            self._ackTimer.reset(ACK_DELAY)
+
     def originate(self, data='', syn=False, ack=False, fin=False, rst=False):
         """
         Create a packet, enqueue it to be sent, and return it.
         """
+        if self._ackTimer is not None:
+            self._ackTimer.cancel()
+            self._ackTimer = None
         if syn:
             # We really should be randomizing the ISN but until we finish the
             # implementations of the various bits of wraparound logic that were
@@ -731,6 +747,9 @@ class PTCPConnection(object):
         if self._timeWaitCall is not None:
             self._timeWaitCall.cancel()
             self._timeWaitCall = None
+        if self._ackTimer is not None:
+            self._ackTimer.cancel()
+            self._ackTimer = None
 
     _timeWaitCall = None
     _timeWaitTimeout = 0.01     # REALLY fast timeout, right now this is for
