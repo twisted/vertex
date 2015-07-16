@@ -258,7 +258,7 @@ class TCP(object):
     synSent.upon(synAck, enter=established, outputs=[sendAck,
                                                      appNotifyConnected])
 
-    synRcvd.upon(ack, enter=established, outputs=[])
+    synRcvd.upon(ack, enter=established, outputs=[appNotifyConnected])
     synRcvd.upon(appClose, enter=finWait1, outputs=[sendFin])
     synRcvd.upon(timeout, enter=closed, outputs=[sendRst, releaseResources])
     synRcvd.upon(rst, enter=broken,
@@ -290,7 +290,7 @@ class TCP(object):
     lastAck.upon(timeout, enter=broken, outputs=[releaseResources])
 
     finWait1.upon(ack, enter=finWait2, outputs=[])
-    finWait1.upon(fin, enter=ack, outputs=[sendAck])
+    finWait1.upon(fin, enter=closing, outputs=[sendAck])
     finWait1.upon(timeout, enter=broken, outputs=[releaseResources])
 
     finWait2.upon(timeout, enter=broken, outputs=[releaseResources])
@@ -300,3 +300,6 @@ class TCP(object):
     closing.upon(ack, enter=timeWait, outputs=[startTimeWaiting])
 
     timeWait.upon(timeout, enter=closed, outputs=[releaseResources])
+
+    for noDataState in [finWait1, finWait2, closing]:
+        noDataState.upon(segmentReceived, enter=noDataState, outputs=[])
