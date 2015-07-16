@@ -248,13 +248,21 @@ class TCP(object):
         self._impl.nowHalfClosed()
 
 
+    @_machine.output()
+    def appNotifyAttemptFailed(self):
+        """
+        
+        """
+        self._impl.outgoingConnectionFailed()
+
+
     closed.upon(appPassiveOpen, enter=listen, outputs=[appNotifyListen])
     closed.upon(appActiveOpen, enter=synSent, outputs=[sendSyn])
 
     synSent.upon(timeout, enter=closed,
-                 outputs=[releaseResources])
+                 outputs=[appNotifyAttemptFailed, releaseResources])
     synSent.upon(appClose, enter=closed,
-                 outputs=[releaseResources])
+                 outputs=[appNotifyAttemptFailed, releaseResources])
     synSent.upon(synAck, enter=established, outputs=[sendAck,
                                                      appNotifyConnected])
 
