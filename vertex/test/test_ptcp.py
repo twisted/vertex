@@ -121,19 +121,16 @@ class TestProducerProtocol(protocol.Protocol):
         self.onPaused = defer.Deferred()
 
     def connectionMade(self):
-        print("CM")
         self.onConnect.callback(None)
         self.count = -1
         self.transport.registerProducer(self, False)
 
     def pauseProducing(self):
-        print("PP")
         if self.onPaused is not None:
             self.onPaused.callback(None)
             self.onPaused = None
 
     def resumeProducing(self):
-        print("RP")
         self.count += 1
         if self.count < self.NUM_WRITES:
             bytes = chr(self.count) * self.WRITE_SIZE
