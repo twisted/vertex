@@ -382,17 +382,16 @@ class PTCPConnection(object):
         if self._paused:
             return
 
-        generatedStateMachineInput = False
+        if packet.syn and packet.dlen:
+            # Whoops, what?  SYNs probably can contain data, I think, but I
+            # certainly don't see anything in the spec about how to deal with
+            # this or in ethereal for how linux deals with it -glyph
+            raise BadPacketError(
+                "currently no data allowed in SYN packets: %r"
+                % (packet,))
+
         if packet.syn:
-            if packet.dlen:
-                # Whoops, what?  SYNs probably can contain data, I think, but I
-                # certainly don't see anything in the spec about how to deal
-                # with this or in ethereal for how linux deals with it -glyph
-                raise BadPacketError(
-                    "currently no data allowed in SYN packets: %r"
-                    % (packet,))
-            else:
-                assert packet.segmentLength() == 1
+            assert packet.segmentLength() == 1
             if self.peerAddressTuple is None:
                 # we're a server
                 assert self.wasEverListen, "Clients must specify a connect address."
@@ -406,15 +405,6 @@ class PTCPConnection(object):
                         "Peer ISN was already set to %s but incoming packet "
                         "tried to set it to %s" % (
                             self.peerSendISN, packet.seqNum))
-                if not self.retransmissionQueue:
-                    # If our retransmissionQueue is hot, we are going to send
-                    # them an ACK to this with the next packet we send them
-                    # anyway; as a bonus, this will properly determine whether
-                    # we're sending a SYN+ACK or merely an ACK; the only time
-                    # we send an ACK is when we have nothing to say to them and
-                    # they're blocked on getting a response to their SYN+ACK
-                    # from us. -glyph
-                    self.originate(ack=True)
                 return
             self.setPeerISN = True
             self.peerSendISN = packet.seqNum
@@ -423,46 +413,27 @@ class PTCPConnection(object):
             # data/fin processing block.
             self.nextRecvSeqNum += packet.segmentLength()
             if not packet.ack:
-                generatedStateMachineInput = True
+                # Since "syn" and "synAck" are separate inputs, we produce
+                # 'synAck' below once we've ensured the ack is acceptable.
                 self.machine.syn()
 
-        SEG_ACK = packet.relativeAck() # aliasing this for easier reading w/
-                                       # the RFC
-        if packet.ack:
-            if (self.oldestUnackedSendSeqNum < SEG_ACK and
-                SEG_ACK <= self.nextSendSeqNum):
-                # According to the spec, an 'acceptable ack
-                rq = self.retransmissionQueue
-                while rq:
-                    segmentOnQueue = rq[0]
-                    qSegSeq = segmentOnQueue.relativeSeq()
-                    if qSegSeq + segmentOnQueue.segmentLength() <= SEG_ACK:
-                        # fully acknowledged, as per RFC!
-                        rq.pop(0)
-                        sminput = None
-                        self.sendWindowRemaining += segmentOnQueue.segmentLength()
-                        # print 'inc send window', self, self.sendWindowRemaining
-                        if segmentOnQueue.syn:
-                            if packet.syn:
-                                sminput = self.machine.synAck
-                            else:
-                                sminput = self.machine.ack
-                        elif segmentOnQueue.fin:
-                            sminput = self.machine.ack
-                        if sminput is not None:
-                            # print 'ack input:', segmentOnQueue, packet, sminput
-                            generatedStateMachineInput = True
-                            sminput()
-                    else:
-                        break
-                else:
-                    # write buffer is empty; alert the application layer.
-                    self._writeBufferEmpty()
-                self.oldestUnackedSendSeqNum = SEG_ACK
+        if packet.ack and ackAcceptable(self.oldestUnackedSendSeqNum,
+                                        packet.relativeAck(),
+                                        self.nextSendSeqNum):
+            rq = self.retransmissionQueue
+            while rq and ((rq[0].relativeSeq() + rq[0].segmentLength())
+                          <= packet.relativeAck()):
+                # fully acknowledged, as per RFC!
+                self.sendWindowRemaining += rq.pop(0).segmentLength()
+                # print 'inc send window', self, self.sendWindowRemaining
+            self.oldestUnackedSendSeqNum = packet.relativeAck()
 
-        if packet.syn:
-            assert generatedStateMachineInput
-            return
+            self.machine.maybeReceiveAck(packet)
+
+            if not rq:
+                # write buffer is empty; alert the application layer.
+                self._writeBufferEmpty()
+
 
         # XXX TODO: examine 'window' field and adjust sendWindowRemaining
         # is it 'occupying a portion of valid receive sequence space'?  I think
@@ -475,15 +446,9 @@ class PTCPConnection(object):
                                  self.recvWindow,
                                  packet.relativeSeq(),
                                  packet.segmentLength()):
-            # We have to transmit an ack here since it's old data.  We probably
-            # need to ack in more states than just ESTABLISHED... but which
-            # ones?
-            if not self.retransmissionQueue:
-                self.originate(ack=True)
+            self.ackSoon()
             return
 
-        # OK!  It's acceptable!  Let's process the various bits of data.
-        # Where is the useful data in the packet?
         if packet.relativeSeq() > self.nextRecvSeqNum:
             # XXX: Here's what's going on.  Data can be 'in the window', but
             # still in the future.  For example, if I have a window of length 3
@@ -497,11 +462,14 @@ class PTCPConnection(object):
             # to retransmit them anyway.
             return
 
+        # OK!  It's acceptable!  Let's process the various bits of data.
+        # Where is the useful data in the packet?
         if packet.dlen:
-            assert not packet.syn, 'no seriously I _do not_ know how to handle this'
             usefulData = packet.data[self.nextRecvSeqNum - packet.relativeSeq():]
             # DONT check/slice the window size here, the acceptability code
             # checked it, we can over-ack if the other side is buggy (???)
+
+            self.machine.segmentReceived()
             if self.protocol is not None:
                 try:
                     self.protocol.dataReceived(usefulData)
@@ -511,11 +479,10 @@ class PTCPConnection(object):
 
         self.nextRecvSeqNum += packet.segmentLength()
 
-        if packet.segmentLength() > 0:
-            self.machine.segmentReceived()
-
         if packet.fin:
             self.machine.fin()
+        elif packet.segmentLength() > 0:
+            self.ackSoon()
 
 
     def getHost(self):
