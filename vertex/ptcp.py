@@ -780,8 +780,7 @@ class PTCPConnection(object):
     _closeWaitLoseConnection = None
 
     def nowHalfClosed(self):
-        # Twisted automatically reacts to network half-close by issuing a full
-        # close.
+        # TODO: look for IHalfCloseableProtocol, call the appropriate methods
         def appCloseNow():
             self._closeWaitLoseConnection = None
             self.loseConnection()
