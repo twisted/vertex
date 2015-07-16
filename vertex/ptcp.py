@@ -179,7 +179,12 @@ class PTCPPacket(util.FancyStrMixin, object):
     decode = classmethod(decode)
 
     def mustRetransmit(self):
-        """Check to see if this packet must be retransmitted until it was received.
+        """
+        Check to see if this packet must be retransmitted until it was
+        received.
+
+        Packets which contain a connection-state changing flag (SYN or FIN) or
+        a non-zero amount of data can be retransmitted.
         """
         if self.syn or self.fin or self.dlen:
             return True
