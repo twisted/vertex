@@ -542,7 +542,7 @@ class PTCPConnection(object):
 
     def _writeLater(self):
         if self._nagle is None:
-            self._nagle = reactor.callLater(0.001, self._reallyWrite)
+            self._nagle = reactor.callLater(SEND_DELAY, self._reallyWrite)
 
     def _originateOneData(self):
         amount = min(self.sendWindowRemaining, self.mtu)
