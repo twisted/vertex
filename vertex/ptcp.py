@@ -32,6 +32,9 @@ _packetFormat = ('!' # WTF did you think
                  )
 _fixedSize = struct.calcsize(_packetFormat)
 
+SEND_DELAY = 0.00001
+ACK_DELAY = 0.00001
+
 _SYN, _ACK, _FIN, _RST, _STB = [1 << n for n in range(5)]
 
 def _flagprop(flag):
