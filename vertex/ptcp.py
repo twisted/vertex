@@ -687,7 +687,7 @@ class PTCPConnection(object):
         self.ptcp.sendPacket(p)
 
     # State machine transition definitions, hooray.
-    def transition_SYN_SENT_to_CLOSED(self):
+    def outgoingConnectionFailed(self):
         """
         The connection never got anywhere.  Goodbye.
         """
