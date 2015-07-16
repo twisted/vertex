@@ -243,8 +243,11 @@ def ISN():
     return 0
 
 
+
 def segmentAcceptable(RCV_NXT, RCV_WND, SEG_SEQ, SEG_LEN):
-    # RFC page 26.
+    """
+    An acceptable segment: RFC 793 page 26.
+    """
     if SEG_LEN == 0 and RCV_WND == 0:
         return SEG_SEQ == RCV_NXT
     if SEG_LEN == 0 and RCV_WND > 0:
