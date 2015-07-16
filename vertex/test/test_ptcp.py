@@ -139,10 +139,8 @@ class TestProducerProtocol(protocol.Protocol):
             if self.count == self.NUM_WRITES - 1:
                 # Last time through, intentionally drop the connection before
                 # the buffer is empty to ensure we handle this case properly.
-                print 'Disconnecting'
                 self.transport.loseConnection()
         else:
-            print 'Unregistering'
             self.transport.unregisterProducer()
 
 class PTCPTransportTestCase(ConnectedPTCPMixin, unittest.TestCase):
