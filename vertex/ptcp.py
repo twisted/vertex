@@ -787,28 +787,6 @@ class PTCPConnection(object):
         self._closeWaitLoseConnection = reactor.callLater(0.01, appCloseNow)
 
 
-    def immediateShutdown(self):
-        """_IMMEDIATELY_ shut down this connection, sending one (non-retransmitted)
-        app-close packet, emptying our buffers, clearing our producer and
-        getting ready to die right after this call.
-        """
-        self._outgoingBytes = ''
-
-        self.machine.appClose()
-
-        self._stopRetransmitting()
-        self._reallyRetransmit()
-
-        # All states that we can reasonably be in handle a timeout; force our
-        # connection to think that it's become desynchronized with the other
-        # end so that it will totally shut itself down.
-
-        self.machine.timeout()
-
-        assert self._retransmitter is None
-        assert self._nagle is None
-
-
 
 class PTCPAddress(object):
     # garbage
@@ -941,7 +919,7 @@ class PTCP(protocol.DatagramProtocol):
         reach the other end, but nevertheless can be useful) when possible.
         """
         for conn in self._connections.values():
-            conn.immediateShutdown()
+            conn.releaseConnectionResources()
         assert not self._connections
 
     def stopProtocol(self):
