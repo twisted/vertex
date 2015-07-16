@@ -694,7 +694,8 @@ class PTCPConnection(object):
             assert self.hostSendISN == 0
         p = PTCPPacket.create(self.hostPseudoPort,
                               self.peerPseudoPort,
-                              seqNum=(self.nextSendSeqNum + self.hostSendISN) % (2**32),
+                              seqNum=(self.nextSendSeqNum +
+                                      self.hostSendISN) % (2**32),
                               ackNum=self.currentAckNum(),
                               data=data,
                               window=self.recvWindow,
