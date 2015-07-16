@@ -708,18 +708,6 @@ class PTCPConnection(object):
         if self._timeWaitCall is not None:
             self._timeWaitCall.cancel()
             self._timeWaitCall = None
-        if self._closeWaitLoseConnection is not None:
-            self._closeWaitLoseConnection.cancel()
-            self._closeWaitLoseConnection = None
-        if self._nagle is not None:
-            self._nagle.cancel()
-            self._nagle = None
-        if self._closeWaitLoseConnection is not None:
-            self._closeWaitLoseConnection.cancel()
-            self._closeWaitLoseConnection = None
-        if self._retransmitter is not None:
-            self._retransmitter.cancel()
-            self._retransmitter = None
 
     _timeWaitCall = None
     _timeWaitTimeout = 0.01     # REALLY fast timeout, right now this is for
