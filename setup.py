@@ -16,6 +16,7 @@ setup(
         'Twisted>=13.1.0',
         'pyOpenSSL>=0.13',
         'automat',
+        'pretend',
     ],
     license="MIT",
     platforms=["any"],
