@@ -423,13 +423,10 @@ class PTCPConnection(object):
                         # print 'inc send window', self, self.sendWindowRemaining
                         if segmentOnQueue.syn:
                             if packet.syn:
-                                log.msg("generating syn+ack")
                                 sminput = self.machine.synAck
                             else:
-                                log.msg("generating ack")
                                 sminput = self.machine.ack
                         elif segmentOnQueue.fin:
-                            log.msg("generating ack (for fin)")
                             sminput = self.machine.ack
                         if sminput is not None:
                             # print 'ack input:', segmentOnQueue, packet, sminput
