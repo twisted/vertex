@@ -914,7 +914,6 @@ class PTCP(protocol.DatagramProtocol):
     def sendPacket(self, packet):
         if self.transportGoneAway:
             return
-        print("SEND", packet)
         self.transport.write(packet.encode(), packet.destination)
 
 
@@ -965,7 +964,6 @@ class PTCP(protocol.DatagramProtocol):
             return
 
         pkt = PTCPPacket.decode(bytes, addr)
-        print("RECV", pkt)
         try:
             pkt.verifyChecksum()
         except TruncatedDataError:
