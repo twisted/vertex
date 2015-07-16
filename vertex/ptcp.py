@@ -261,6 +261,16 @@ def segmentAcceptable(RCV_NXT, RCV_WND, SEG_SEQ, SEG_LEN):
     assert 0, 'Should be impossible to get here.'
     return False
 
+
+
+def ackAcceptable(SND_UNA, SEG_ACK, SND_NXT):
+    """
+    An acceptable ACK: RFC 793 page 25.
+    """
+    return SND_UNA < SEG_ACK <= SND_NXT
+
+
+
 class BadPacketError(Exception):
     """
     A packet was bad for some reason.
