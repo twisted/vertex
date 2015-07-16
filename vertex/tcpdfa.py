@@ -202,40 +202,101 @@ class TCP(object):
         self._impl.originate(rst=True)
 
 
-    closed.upon(appPassiveOpen, enter=listen, outputs=[])
+    @_machine.output()
+    def appNotifyConnected(self):
+        """
+        
+        """
+        self._impl.connectionJustEstablished()
+
+
+    @_machine.output()
+    def appNotifyDisconnected(self):
+        """
+        
+        """
+        self._impl.connectionJustEnded()
+
+
+    @_machine.output()
+    def releaseResources(self):
+        """
+        
+        """
+        self._impl.releaseConnectionResources()
+
+
+    @_machine.output()
+    def startTimeWaiting(self):
+        """
+        
+        """
+        self._impl.scheduleTimeWaitTimeout()
+
+    @_machine.output()
+    def appNotifyListen(self):
+        """
+        
+        """
+        self._impl.nowListeningSocket()
+
+    @_machine.output()
+    def appNotifyHalfClose(self):
+        """
+        Input ended.
+        """
+        self._impl.nowHalfClosed()
+
+
+    closed.upon(appPassiveOpen, enter=listen, outputs=[appNotifyListen])
     closed.upon(appActiveOpen, enter=synSent, outputs=[sendSyn])
 
-    synSent.upon(timeout, enter=closed, outputs=[])
-    synSent.upon(appClose, enter=closed, outputs=[])
-    synSent.upon(synAck, enter=established, outputs=[sendAck])
+    synSent.upon(timeout, enter=closed,
+                 outputs=[releaseResources])
+    synSent.upon(appClose, enter=closed,
+                 outputs=[releaseResources])
+    synSent.upon(synAck, enter=established, outputs=[sendAck,
+                                                     appNotifyConnected])
 
     synRcvd.upon(ack, enter=established, outputs=[])
     synRcvd.upon(appClose, enter=finWait1, outputs=[sendFin])
-    synRcvd.upon(timeout, enter=closed, outputs=[sendRst])
-    synRcvd.upon(rst, enter=listen, outputs=[])
+    synRcvd.upon(timeout, enter=closed, outputs=[sendRst, releaseResources])
+    synRcvd.upon(rst, enter=broken,
+                 outputs=[releaseResources])
 
     listen.upon(appSendData, enter=synSent, outputs=[sendSyn])
     listen.upon(syn, enter=synRcvd, outputs=[sendSynAck])
 
-    established.upon(appClose, enter=finWait1, outputs=[sendFin])
-    established.upon(segmentReceived, enter=established, outputs=[sendAck])
-    established.upon(fin, enter=closeWait, outputs=[sendAck])
-    established.upon(timeout, enter=broken, outputs=[])
+    established.upon(segmentReceived, enter=established,
+                     outputs=[sendAck])
 
-    closeWait.upon(appClose, enter=lastAck, outputs=[sendFin])
-    closeWait.upon(timeout, enter=broken, outputs=[])
+    established.upon(appClose, enter=finWait1,
+                     outputs=[appNotifyDisconnected,
+                              sendFin])
+    established.upon(fin, enter=closeWait,
+                     outputs=[appNotifyHalfClose,
+                              sendAck])
+    established.upon(timeout, enter=broken, outputs=[appNotifyDisconnected,
+                                                     releaseResources])
 
-    lastAck.upon(ack, enter=closed, outputs=[])
-    lastAck.upon(timeout, enter=broken, outputs=[])
+    closeWait.upon(appClose, enter=lastAck,
+                   outputs=[sendFin,
+                            appNotifyDisconnected])
+    closeWait.upon(timeout, enter=broken,
+                   outputs=[appNotifyDisconnected,
+                            releaseResources])
+
+    lastAck.upon(ack, enter=closed, outputs=[releaseResources])
+    lastAck.upon(timeout, enter=broken, outputs=[releaseResources])
 
     finWait1.upon(ack, enter=finWait2, outputs=[])
     finWait1.upon(fin, enter=ack, outputs=[sendAck])
-    finWait1.upon(timeout, enter=broken, outputs=[])
+    finWait1.upon(timeout, enter=broken, outputs=[releaseResources])
 
-    finWait2.upon(timeout, enter=broken, outputs=[])
-    finWait2.upon(fin, enter=timeWait, outputs=[sendAck])
+    finWait2.upon(timeout, enter=broken, outputs=[releaseResources])
+    finWait2.upon(fin, enter=timeWait, outputs=[sendAck, startTimeWaiting])
 
-    closing.upon(timeout, enter=broken, outputs=[])
-    closing.upon(ack, enter=timeWait, outputs=[])
+    closing.upon(timeout, enter=broken, outputs=[releaseResources])
+    closing.upon(ack, enter=timeWait, outputs=[startTimeWaiting])
 
-    timeWait.upon(timeout, enter=closed, outputs=[])
+    timeWait.upon(timeout, enter=closed, outputs=[releaseResources])

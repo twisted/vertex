@@ -429,8 +429,8 @@ class PTCPConnection(object):
                                 log.msg("generating ack")
                                 sminput = self.machine.ack
                         elif segmentOnQueue.fin:
-                            log.msg("generating syn")
-                            sminput = self.machine.syn
+                            log.msg("generating ack (for fin)")
+                            sminput = self.machine.ack
                         if sminput is not None:
                             # print 'ack input:', segmentOnQueue, packet, sminput
                             generatedStateMachineInput = True
@@ -697,12 +697,12 @@ class PTCPConnection(object):
 
     wasEverListen = False
 
-    def enter_LISTEN(self):
+    def nowListeningSocket(self):
         # Spec says this is necessary for RST handling; we need it for making
         # sure it's OK to bind port numbers.
         self.wasEverListen = True
 
-    def enter_CLOSED(self):
+    def releaseConnectionResources(self):
         self.ptcp.connectionClosed(self)
         self._stopRetransmitting()
         if self._timeWaitCall is not None:
@@ -713,7 +713,7 @@ class PTCPConnection(object):
     _timeWaitTimeout = 0.01     # REALLY fast timeout, right now this is for
                                 # the tests...
 
-    def enter_TIME_WAIT(self):
+    def scheduleTimeWaitTimeout(self):
         self._stopRetransmitting()
         self._timeWaitCall = reactor.callLater(self._timeWaitTimeout, self._do2mslTimeout)
 
@@ -730,7 +730,7 @@ class PTCPConnection(object):
         return get,
     pseudoPortPair = property(*pseudoPortPair())
 
-    def enter_ESTABLISHED(self):
+    def connectionJustEstablished(self):
         """
         We sent out SYN, they acknowledged it.  Congratulations, you
         have a new baby connection.
@@ -748,7 +748,7 @@ class PTCPConnection(object):
         else:
             self.protocol = p
 
-    def exit_ESTABLISHED(self):
+    def connectionJustEnded(self):
         assert not self.disconnected
         self.disconnected = True
         try:
@@ -767,14 +767,14 @@ class PTCPConnection(object):
 
     _closeWaitLoseConnection = None
 
-    def enter_CLOSE_WAIT(self):
+    def nowHalfClosed(self):
         # Twisted automatically reacts to network half-close by issuing a full
         # close.
-        self._closeWaitLoseConnection = reactor.callLater(0.01, self._loseConnectionBecauseOfCloseWait)
+        def appCloseNow(self):
+            self._closeWaitLoseConnection = None
+            self.loseConnection()
+        self._closeWaitLoseConnection = reactor.callLater(0.01, appCloseNow)
 
-    def _loseConnectionBecauseOfCloseWait(self):
-        self._closeWaitLoseConnection = None
-        self.loseConnection()
 
     def immediateShutdown(self):
         """_IMMEDIATELY_ shut down this connection, sending one (non-retransmitted)

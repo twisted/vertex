@@ -121,16 +121,19 @@ class TestProducerProtocol(protocol.Protocol):
         self.onPaused = defer.Deferred()
 
     def connectionMade(self):
+        print("CM")
         self.onConnect.callback(None)
         self.count = -1
         self.transport.registerProducer(self, False)
 
     def pauseProducing(self):
+        print("PP")
         if self.onPaused is not None:
             self.onPaused.callback(None)
             self.onPaused = None
 
     def resumeProducing(self):
+        print("RP")
         self.count += 1
         if self.count < self.NUM_WRITES:
             bytes = chr(self.count) * self.WRITE_SIZE
@@ -139,10 +142,10 @@ class TestProducerProtocol(protocol.Protocol):
             if self.count == self.NUM_WRITES - 1:
                 # Last time through, intentionally drop the connection before
                 # the buffer is empty to ensure we handle this case properly.
-                # print 'Disconnecting'
+                print 'Disconnecting'
                 self.transport.loseConnection()
         else:
-            # print 'Unregistering'
+            print 'Unregistering'
             self.transport.unregisterProducer()
 
 class PTCPTransportTestCase(ConnectedPTCPMixin, unittest.TestCase):
