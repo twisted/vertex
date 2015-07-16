@@ -703,6 +703,8 @@ class PTCPConnection(object):
                 # print 'my queue is still small enough', len(self.retransmissionQueue), self, self.sendWindowRemaining
                 pass
         self.ptcp.sendPacket(p)
+        return p
+
 
     # State machine transition definitions, hooray.
     def outgoingConnectionFailed(self):
