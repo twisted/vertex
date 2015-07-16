@@ -666,6 +666,9 @@ class PTCPConnection(object):
         return (self.nextRecvSeqNum + self.peerSendISN) % (2**32)
 
     def originate(self, data='', syn=False, ack=False, fin=False, rst=False):
+        """
+        Create a packet, enqueue it to be sent, and return it.
+        """
         if syn:
             # We really should be randomizing the ISN but until we finish the
             # implementations of the various bits of wraparound logic that were
