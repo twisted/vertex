@@ -1,5 +1,7 @@
 # -*- test-case-name: vertex.test.test_ptcp -*-
 
+from __future__ import print_function
+
 import struct
 
 from binascii import crc32  # used to use zlib.crc32 - but that gives different
@@ -965,11 +967,11 @@ class PTCP(protocol.DatagramProtocol):
                     stb=True,
                     destination=addr))
         except GarbageDataError:
-            print "garbage data!", pkt
+            print("garbage data!", pkt)
         except ChecksumMismatchError, cme:
-            print "bad checksum", pkt, cme
-            print repr(pkt.data)
-            print hex(pkt.checksum), hex(pkt.computeChecksum())
+            print("bad checksum", pkt, cme)
+            print(repr(pkt.data))
+            print(hex(pkt.checksum), hex(pkt.computeChecksum()))
         else:
             self.packetReceived(pkt)
 
