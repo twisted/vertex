@@ -1,4 +1,5 @@
 # -*- test-case-name: vertex.test.test_ptcp -*-
+from __future__ import print_function
 
 import random, os
 
@@ -48,8 +49,8 @@ class TestProtocol(protocol.Protocol):
             bytes = ''.join(self.buffer)
             if not self._waiting[1].startswith(bytes):
                 x = len(os.path.commonprefix([bytes, self._waiting[1]]))
-                print x
-                print 'it goes wrong starting with', repr(bytes[x:x+100]), repr(self._waiting[1][x:x+100])
+                print(x)
+                print('it goes wrong starting with', repr(bytes[x:x+100]), repr(self._waiting[1][x:x+100]))
             if bytes == self._waiting[1]:
                 self._waiting[0].callback(None)
                 self._waiting = None
