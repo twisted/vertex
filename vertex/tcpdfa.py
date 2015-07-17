@@ -372,3 +372,7 @@ class TCP(object):
 
     for noDataState in [finWait1, finWait2, closing]:
         noDataState.upon(segmentReceived, enter=noDataState, outputs=[])
+
+if __name__ == '__main__':
+    for line in TCP._machine.graphviz():
+        print(line)
