@@ -215,6 +215,7 @@ class TCP(object):
         self._impl.originate(ack=True)
 
 
+    @_machine.output()
     def sendAckSoon(self):
         """
         Send an ACK-only packet, but, give it a second; some more data might be
