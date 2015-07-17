@@ -336,7 +336,7 @@ class TCP(object):
                               expectAck])
     established.upon(fin, enter=closeWait,
                      outputs=[appNotifyHalfClose,
-                              sendAckSoon])
+                              sendAck])
     established.upon(timeout, enter=broken, outputs=[appNotifyDisconnected,
                                                      releaseResources])
 
@@ -358,12 +358,11 @@ class TCP(object):
     # TODO: is this actually just "ack" or is it ack _of_ something in
     # particular?  ack of the fin we sent upon transitioning to this state?
     finWait1.upon(ack, enter=finWait2, outputs=[])
-    finWait1.upon(fin, enter=closing, outputs=[sendAckSoon])
+    finWait1.upon(fin, enter=closing, outputs=[sendAck])
     finWait1.upon(timeout, enter=broken, outputs=[releaseResources])
 
     finWait2.upon(timeout, enter=broken, outputs=[releaseResources])
-    finWait2.upon(fin, enter=timeWait, outputs=[sendAckSoon,
-                                                startTimeWaiting])
+    finWait2.upon(fin, enter=timeWait, outputs=[sendAck, startTimeWaiting])
 
     closing.upon(timeout, enter=broken, outputs=[releaseResources])
     closing.upon(ack, enter=timeWait, outputs=[startTimeWaiting])
