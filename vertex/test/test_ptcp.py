@@ -1,4 +1,5 @@
 # -*- test-case-name: vertex.test.test_ptcp -*-
+from __future__ import print_function
 
 import random, os
 
@@ -48,8 +49,8 @@ class TestProtocol(protocol.Protocol):
             bytes = ''.join(self.buffer)
             if not self._waiting[1].startswith(bytes):
                 x = len(os.path.commonprefix([bytes, self._waiting[1]]))
-                print x
-                print 'it goes wrong starting with', repr(bytes[x:x+100]), repr(self._waiting[1][x:x+100])
+                print(x)
+                print('it goes wrong starting with', repr(bytes[x:x+100]), repr(self._waiting[1][x:x+100]))
             if bytes == self._waiting[1]:
                 self._waiting[0].callback(None)
                 self._waiting = None
@@ -139,10 +140,8 @@ class TestProducerProtocol(protocol.Protocol):
             if self.count == self.NUM_WRITES - 1:
                 # Last time through, intentionally drop the connection before
                 # the buffer is empty to ensure we handle this case properly.
-                # print 'Disconnecting'
                 self.transport.loseConnection()
         else:
-            # print 'Unregistering'
             self.transport.unregisterProducer()
 
 class PTCPTransportTestCase(ConnectedPTCPMixin, unittest.TestCase):

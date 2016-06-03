@@ -1,5 +1,7 @@
 # -*- test-case-name: vertex.test.test_ptcp -*-
 
+from __future__ import print_function
+
 import struct
 
 from binascii import crc32  # used to use zlib.crc32 - but that gives different
@@ -7,15 +9,13 @@ from binascii import crc32  # used to use zlib.crc32 - but that gives different
 
 import itertools
 
+from tcpdfa import TCP
+
 from twisted.python.failure import Failure
 from twisted.internet.defer import Deferred
 from twisted.internet import protocol, error, reactor, defer
 from twisted.internet.main import CONNECTION_DONE
 from twisted.python import log, util
-
-from vertex import tcpdfa
-from vertex.statemachine import StateError
-
 
 genConnID = itertools.count(8).next
 
@@ -33,6 +33,9 @@ _packetFormat = ('!' # WTF did you think
                  'H' # dlen
                  )
 _fixedSize = struct.calcsize(_packetFormat)
+
+SEND_DELAY = 0.00001
+ACK_DELAY = 0.00001
 
 _SYN, _ACK, _FIN, _RST, _STB = [1 << n for n in range(5)]
 
@@ -181,7 +184,12 @@ class PTCPPacket(util.FancyStrMixin, object):
     decode = classmethod(decode)
 
     def mustRetransmit(self):
-        """Check to see if this packet must be retransmitted until it was received.
+        """
+        Check to see if this packet must be retransmitted until it was
+        received.
+
+        Packets which contain a connection-state changing flag (SYN or FIN) or
+        a non-zero amount of data can be retransmitted.
         """
         if self.syn or self.fin or self.dlen:
             return True
@@ -237,8 +245,11 @@ def ISN():
     return 0
 
 
+
 def segmentAcceptable(RCV_NXT, RCV_WND, SEG_SEQ, SEG_LEN):
-    # RFC page 26.
+    """
+    An acceptable segment: RFC 793 page 26.
+    """
     if SEG_LEN == 0 and RCV_WND == 0:
         return SEG_SEQ == RCV_NXT
     if SEG_LEN == 0 and RCV_WND > 0:
@@ -251,6 +262,16 @@ def segmentAcceptable(RCV_NXT, RCV_WND, SEG_SEQ, SEG_LEN):
                     (SEG_SEQ+SEG_LEN-1 < RCV_NXT + RCV_WND)))
     assert 0, 'Should be impossible to get here.'
     return False
+
+
+
+def ackAcceptable(SND_UNA, SEG_ACK, SND_NXT):
+    """
+    An acceptable ACK: RFC 793 page 25.
+    """
+    return SND_UNA < SEG_ACK <= SND_NXT
+
+
 
 class BadPacketError(Exception):
     """
@@ -272,7 +293,9 @@ class GarbageDataError(Exception):
     Too much data was received (???)
     """
 
-class PTCPConnection(tcpdfa.TCP):
+
+
+class PTCPConnection(object):
     """
     Implementation of RFC 793 state machine.
 
@@ -325,7 +348,6 @@ class PTCPConnection(tcpdfa.TCP):
     def __init__(self,
                  hostPseudoPort, peerPseudoPort,
                  ptcp, factory, peerAddressTuple):
-        tcpdfa.TCP.__init__(self)
         self.hostPseudoPort = hostPseudoPort
         self.peerPseudoPort = peerPseudoPort
         self.ptcp = ptcp
@@ -340,6 +362,7 @@ class PTCPConnection(tcpdfa.TCP):
         self.nextRecvSeqNum = 0
         self.peerSendISN = 0
         self.setPeerISN = False
+        self.machine = TCP(self)
 
     peerSendISN = None
 
@@ -361,17 +384,16 @@ class PTCPConnection(tcpdfa.TCP):
         if self._paused:
             return
 
-        generatedStateMachineInput = False
+        if packet.syn and packet.dlen:
+            # Whoops, what?  SYNs probably can contain data, I think, but I
+            # certainly don't see anything in the spec about how to deal with
+            # this or in ethereal for how linux deals with it -glyph
+            raise BadPacketError(
+                "currently no data allowed in SYN packets: %r"
+                % (packet,))
+
         if packet.syn:
-            if packet.dlen:
-                # Whoops, what?  SYNs probably can contain data, I think, but I
-                # certainly don't see anything in the spec about how to deal
-                # with this or in ethereal for how linux deals with it -glyph
-                raise BadPacketError(
-                    "currently no data allowed in SYN packets: %r"
-                    % (packet,))
-            else:
-                assert packet.segmentLength() == 1
+            assert packet.segmentLength() == 1
             if self.peerAddressTuple is None:
                 # we're a server
                 assert self.wasEverListen, "Clients must specify a connect address."
@@ -385,15 +407,6 @@ class PTCPConnection(tcpdfa.TCP):
                         "Peer ISN was already set to %s but incoming packet "
                         "tried to set it to %s" % (
                             self.peerSendISN, packet.seqNum))
-                if not self.retransmissionQueue:
-                    # If our retransmissionQueue is hot, we are going to send
-                    # them an ACK to this with the next packet we send them
-                    # anyway; as a bonus, this will properly determine whether
-                    # we're sending a SYN+ACK or merely an ACK; the only time
-                    # we send an ACK is when we have nothing to say to them and
-                    # they're blocked on getting a response to their SYN+ACK
-                    # from us. -glyph
-                    self.originate(ack=True)
                 return
             self.setPeerISN = True
             self.peerSendISN = packet.seqNum
@@ -402,46 +415,27 @@ class PTCPConnection(tcpdfa.TCP):
             # data/fin processing block.
             self.nextRecvSeqNum += packet.segmentLength()
             if not packet.ack:
-                generatedStateMachineInput = True
-                self.input(tcpdfa.SYN)
+                # Since "syn" and "synAck" are separate inputs, we produce
+                # 'synAck' below once we've ensured the ack is acceptable.
+                self.machine.syn()
 
-        SEG_ACK = packet.relativeAck() # aliasing this for easier reading w/
-                                       # the RFC
-        if packet.ack:
-            if (self.oldestUnackedSendSeqNum < SEG_ACK and
-                SEG_ACK <= self.nextSendSeqNum):
-                # According to the spec, an 'acceptable ack
-                rq = self.retransmissionQueue
-                while rq:
-                    segmentOnQueue = rq[0]
-                    qSegSeq = segmentOnQueue.relativeSeq()
-                    if qSegSeq + segmentOnQueue.segmentLength() <= SEG_ACK:
-                        # fully acknowledged, as per RFC!
-                        rq.pop(0)
-                        sminput = None
-                        self.sendWindowRemaining += segmentOnQueue.segmentLength()
-                        # print 'inc send window', self, self.sendWindowRemaining
-                        if segmentOnQueue.syn:
-                            if packet.syn:
-                                sminput = tcpdfa.SYN_ACK
-                            else:
-                                sminput = tcpdfa.ACK
-                        elif segmentOnQueue.fin:
-                            sminput = tcpdfa.ACK
-                        if sminput is not None:
-                            # print 'ack input:', segmentOnQueue, packet, sminput
-                            generatedStateMachineInput = True
-                            self.input(sminput)
-                    else:
-                        break
-                else:
-                    # write buffer is empty; alert the application layer.
-                    self._writeBufferEmpty()
-                self.oldestUnackedSendSeqNum = SEG_ACK
+        if packet.ack and ackAcceptable(self.oldestUnackedSendSeqNum,
+                                        packet.relativeAck(),
+                                        self.nextSendSeqNum):
+            rq = self.retransmissionQueue
+            while rq and ((rq[0].relativeSeq() + rq[0].segmentLength())
+                          <= packet.relativeAck()):
+                # fully acknowledged, as per RFC!
+                self.sendWindowRemaining += rq.pop(0).segmentLength()
+                # print 'inc send window', self, self.sendWindowRemaining
+            self.oldestUnackedSendSeqNum = packet.relativeAck()
 
-        if packet.syn:
-            assert generatedStateMachineInput
-            return
+            self.machine.maybeReceiveAck(packet)
+
+            if not rq:
+                # write buffer is empty; alert the application layer.
+                self._writeBufferEmpty()
+
 
         # XXX TODO: examine 'window' field and adjust sendWindowRemaining
         # is it 'occupying a portion of valid receive sequence space'?  I think
@@ -454,15 +448,9 @@ class PTCPConnection(tcpdfa.TCP):
                                  self.recvWindow,
                                  packet.relativeSeq(),
                                  packet.segmentLength()):
-            # We have to transmit an ack here since it's old data.  We probably
-            # need to ack in more states than just ESTABLISHED... but which
-            # ones?
-            if not self.retransmissionQueue:
-                self.originate(ack=True)
+            self.ackSoon()
             return
 
-        # OK!  It's acceptable!  Let's process the various bits of data.
-        # Where is the useful data in the packet?
         if packet.relativeSeq() > self.nextRecvSeqNum:
             # XXX: Here's what's going on.  Data can be 'in the window', but
             # still in the future.  For example, if I have a window of length 3
@@ -476,11 +464,14 @@ class PTCPConnection(tcpdfa.TCP):
             # to retransmit them anyway.
             return
 
+        # OK!  It's acceptable!  Let's process the various bits of data.
+        # Where is the useful data in the packet?
         if packet.dlen:
-            assert not packet.syn, 'no seriously I _do not_ know how to handle this'
             usefulData = packet.data[self.nextRecvSeqNum - packet.relativeSeq():]
             # DONT check/slice the window size here, the acceptability code
             # checked it, we can over-ack if the other side is buggy (???)
+
+            self.machine.segmentReceived()
             if self.protocol is not None:
                 try:
                     self.protocol.dataReceived(usefulData)
@@ -489,13 +480,11 @@ class PTCPConnection(tcpdfa.TCP):
                     self.loseConnection()
 
         self.nextRecvSeqNum += packet.segmentLength()
-        if self.state == tcpdfa.ESTABLISHED:
-            # In all other states, the state machine takes care of sending ACKs
-            # in its output process.
-            self.originate(ack=True)
 
         if packet.fin:
-            self.input(tcpdfa.FIN)
+            self.machine.fin()
+        elif packet.segmentLength() > 0:
+            self.ackSoon()
 
 
     def getHost(self):
@@ -522,7 +511,7 @@ class PTCPConnection(tcpdfa.TCP):
 
     def _writeLater(self):
         if self._nagle is None:
-            self._nagle = reactor.callLater(0.001, self._reallyWrite)
+            self._nagle = reactor.callLater(SEND_DELAY, self._reallyWrite)
 
     def _originateOneData(self):
         amount = min(self.sendWindowRemaining, self.mtu)
@@ -544,9 +533,9 @@ class PTCPConnection(tcpdfa.TCP):
     _retransmitTimeout = 0.5
 
     def _retransmitLater(self):
-        assert self.state != tcpdfa.CLOSED
         if self._retransmitter is None:
-            self._retransmitter = reactor.callLater(self._retransmitTimeout, self._reallyRetransmit)
+            self._retransmitter = reactor.callLater(self._retransmitTimeout,
+                                                    self._reallyRetransmit)
 
     def _stopRetransmitting(self):
         # used both as a quick-and-dirty test shutdown hack and a way to shut
@@ -572,7 +561,7 @@ class PTCPConnection(tcpdfa.TCP):
                     packet.ackNum = self.currentAckNum()
                     self.ptcp.sendPacket(packet)
                 else:
-                    self.input(tcpdfa.TIMEOUT)
+                    self.machine.timeout()
                     return
             self._retransmitLater()
 
@@ -593,9 +582,8 @@ class PTCPConnection(tcpdfa.TCP):
             if (not self.streamingProducer) or self.producerPaused:
                 self.producerPaused = False
                 self.producer.resumeProducing()
-        elif self.disconnecting and (not self.disconnected
-                                     or self.state == tcpdfa.CLOSE_WAIT):
-            self.input(tcpdfa.APP_CLOSE)
+        elif self.disconnecting and not self.disconnected:
+            self.machine.appClose()
 
 
     def _writeBufferFull(self):
@@ -646,20 +634,41 @@ class PTCPConnection(tcpdfa.TCP):
     def currentAckNum(self):
         return (self.nextRecvSeqNum + self.peerSendISN) % (2**32)
 
-    def originate(self, data='', syn=False, ack=False, fin=False):
+    _ackTimer = None
+    def ackSoon(self):
+        """
+        Emit an acknowledgement packet soon.
+        """
+        if self._ackTimer is None:
+            def originateAck():
+                self._ackTimer = None
+                self.originate(ack=True)
+            self._ackTimer = reactor.callLater(0.1, originateAck)
+        else:
+            self._ackTimer.reset(ACK_DELAY)
+
+    def originate(self, data='', syn=False, ack=False, fin=False, rst=False):
+        """
+        Create a packet, enqueue it to be sent, and return it.
+        """
+        if self._ackTimer is not None:
+            self._ackTimer.cancel()
+            self._ackTimer = None
         if syn:
             # We really should be randomizing the ISN but until we finish the
             # implementations of the various bits of wraparound logic that were
             # started with relativeSequence
-            assert self.nextSendSeqNum == 0
+            assert self.nextSendSeqNum == 0, (
+                "NSSN = " + repr(self.nextSendSeqNum))
             assert self.hostSendISN == 0
         p = PTCPPacket.create(self.hostPseudoPort,
                               self.peerPseudoPort,
-                              seqNum=(self.nextSendSeqNum + self.hostSendISN) % (2**32),
+                              seqNum=(self.nextSendSeqNum +
+                                      self.hostSendISN) % (2**32),
                               ackNum=self.currentAckNum(),
                               data=data,
                               window=self.recvWindow,
-                              syn=syn, ack=ack, fin=fin,
+                              syn=syn, ack=ack, fin=fin, rst=rst,
                               destination=self.peerAddressTuple)
         # do we want to enqueue this packet for retransmission?
         sl = p.segmentLength()
@@ -683,9 +692,11 @@ class PTCPConnection(tcpdfa.TCP):
                 # print 'my queue is still small enough', len(self.retransmissionQueue), self, self.sendWindowRemaining
                 pass
         self.ptcp.sendPacket(p)
+        return p
+
 
     # State machine transition definitions, hooray.
-    def transition_SYN_SENT_to_CLOSED(self):
+    def outgoingConnectionFailed(self):
         """
         The connection never got anywhere.  Goodbye.
         """
@@ -695,41 +706,34 @@ class PTCPConnection(tcpdfa.TCP):
 
     wasEverListen = False
 
-    def enter_LISTEN(self):
+    def nowListeningSocket(self):
         # Spec says this is necessary for RST handling; we need it for making
         # sure it's OK to bind port numbers.
         self.wasEverListen = True
 
-    def enter_CLOSED(self):
+    def releaseConnectionResources(self):
         self.ptcp.connectionClosed(self)
         self._stopRetransmitting()
         if self._timeWaitCall is not None:
             self._timeWaitCall.cancel()
             self._timeWaitCall = None
+        if self._ackTimer is not None:
+            self._ackTimer.cancel()
+            self._ackTimer = None
 
     _timeWaitCall = None
     _timeWaitTimeout = 0.01     # REALLY fast timeout, right now this is for
                                 # the tests...
 
-    def enter_TIME_WAIT(self):
+    def scheduleTimeWaitTimeout(self):
         self._stopRetransmitting()
         self._timeWaitCall = reactor.callLater(self._timeWaitTimeout, self._do2mslTimeout)
 
     def _do2mslTimeout(self):
         self._timeWaitCall = None
-        self.input(tcpdfa.TIMEOUT)
+        self.machine.timeout()
 
     peerAddressTuple = None
-
-    def transition_LISTEN_to_SYN_SENT(self):
-        """
-        Uh, what?  We were listening and we tried to send some bytes.
-        This is an error for PTCP.
-        """
-        raise StateError("You can't write anything until someone connects to you.")
-
-#     def invalidInput(self, datum):
-#         print self, self.protocol, 'invalid input', datum
 
     def pseudoPortPair():
         def get(self):
@@ -738,7 +742,7 @@ class PTCPConnection(tcpdfa.TCP):
         return get,
     pseudoPortPair = property(*pseudoPortPair())
 
-    def enter_ESTABLISHED(self):
+    def connectionJustEstablished(self):
         """
         We sent out SYN, they acknowledged it.  Congratulations, you
         have a new baby connection.
@@ -756,7 +760,7 @@ class PTCPConnection(tcpdfa.TCP):
         else:
             self.protocol = p
 
-    def exit_ESTABLISHED(self):
+    def connectionJustEnded(self):
         assert not self.disconnected
         self.disconnected = True
         try:
@@ -775,45 +779,14 @@ class PTCPConnection(tcpdfa.TCP):
 
     _closeWaitLoseConnection = None
 
-    def enter_CLOSE_WAIT(self):
-        # Twisted automatically reacts to network half-close by issuing a full
-        # close.
-        self._closeWaitLoseConnection = reactor.callLater(0.01, self._loseConnectionBecauseOfCloseWait)
+    def nowHalfClosed(self):
+        # TODO: look for IHalfCloseableProtocol, call the appropriate methods
+        def appCloseNow():
+            self._closeWaitLoseConnection = None
+            self.loseConnection()
+        self._closeWaitLoseConnection = reactor.callLater(0.01, appCloseNow)
 
-    def _loseConnectionBecauseOfCloseWait(self):
-        self._closeWaitLoseConnection = None
-        self.loseConnection()
 
-    def immediateShutdown(self):
-        """_IMMEDIATELY_ shut down this connection, sending one (non-retransmitted)
-        app-close packet, emptying our buffers, clearing our producer and
-        getting ready to die right after this call.
-        """
-        self._outgoingBytes = ''
-        if self.state == tcpdfa.ESTABLISHED:
-            self.input(tcpdfa.APP_CLOSE)
-            self._stopRetransmitting()
-            self._reallyRetransmit()
-
-        # All states that we can reasonably be in handle a timeout; force our
-        # connection to think that it's become desynchronized with the other
-        # end so that it will totally shut itself down.
-
-        self.input(tcpdfa.TIMEOUT)
-        assert self._retransmitter is None
-        assert self._nagle is None
-
-    def output_ACK(self):
-        self.originate(ack=True)
-
-    def output_FIN(self):
-        self.originate(fin=True)
-
-    def output_SYN_ACK(self):
-        self.originate(syn=True, ack=True)
-
-    def output_SYN(self):
-        self.originate(syn=True)
 
 class PTCPAddress(object):
     # garbage
@@ -924,7 +897,7 @@ class PTCP(protocol.DatagramProtocol):
         conn = self._connections[(pseudoPort, sourcePseudoPort, (host, port))
                                  ] = PTCPConnection(
             sourcePseudoPort, pseudoPort, self, factory, (host, port))
-        conn.input(tcpdfa.APP_ACTIVE_OPEN)
+        conn.machine.appActiveOpen()
         return conn
 
     def sendPacket(self, packet):
@@ -946,7 +919,7 @@ class PTCP(protocol.DatagramProtocol):
         reach the other end, but nevertheless can be useful) when possible.
         """
         for conn in self._connections.values():
-            conn.immediateShutdown()
+            conn.releaseConnectionResources()
         assert not self._connections
 
     def stopProtocol(self):
@@ -994,11 +967,11 @@ class PTCP(protocol.DatagramProtocol):
                     stb=True,
                     destination=addr))
         except GarbageDataError:
-            print "garbage data!", pkt
+            print("garbage data!", pkt)
         except ChecksumMismatchError, cme:
-            print "bad checksum", pkt, cme
-            print repr(pkt.data)
-            print hex(pkt.checksum), hex(pkt.computeChecksum())
+            print("bad checksum", pkt, cme)
+            print(repr(pkt.data))
+            print(hex(pkt.checksum), hex(pkt.computeChecksum()))
         else:
             self.packetReceived(pkt)
 
@@ -1037,7 +1010,7 @@ class PTCP(protocol.DatagramProtocol):
                 conn = PTCPConnection(packet.destPseudoPort,
                                       packet.sourcePseudoPort, self,
                                       self.factory, packet.peerAddressTuple)
-                conn.input(tcpdfa.APP_PASSIVE_OPEN)
+                conn.machine.appPassiveOpen()
                 self._connections[packey] = conn
             else:
                 log.msg("corrupted packet? %r %r %r" % (packet,packey, self._connections))
