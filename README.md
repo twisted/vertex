@@ -1,5 +1,5 @@
 [![Build Status](https://travis-ci.org/twisted/vertex.png?branch=master)](https://travis-ci.org/twisted/vertex)
-
+[![codecov.io](https://codecov.io/github/twisted/vertex/coverage.svg?branch=master)](https://codecov.io/github/twisted/vertex?branch=master)
 # Divmod Vertex #
 
 Pull up a chair, and let me tell you a story of the once and future Internet.
