@@ -11,7 +11,7 @@ python:
 
 install:
   - pip install pyflakes
-  - pip install coveralls
+  - pip install codecov
   - pip install pretend
   - pip install .
 
@@ -24,7 +24,7 @@ script:
   - coverage run `which trial` vertex
 
 after_success:
-  - coveralls
+  - codecov
 
 notifications:
   email: false
