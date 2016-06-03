@@ -1,5 +1,4 @@
 [![Build Status](https://travis-ci.org/twisted/vertex.png?branch=master)](https://travis-ci.org/twisted/vertex)
-[![Coverage Status](https://coveralls.io/repos/twisted/vertex/badge.png?branch=master)](https://coveralls.io/r/twisted/vertex)
 
 # Divmod Vertex #
 
