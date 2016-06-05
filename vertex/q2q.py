@@ -441,7 +441,7 @@ class _PTCPConnectionAttemptPress(AbstractConnectionAttempt):
         if not self.cancelled:
             self.q2qproto.service.dispatcher.unbindPort(self.newPort)
         else:
-            print 'totally wacky, [press] cancelled twice!'
+            print('totally wacky, [press] cancelled twice!')
         AbstractConnectionAttempt.cancel(self)
 
 class PTCPMethod(TCPMethod):
