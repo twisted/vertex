@@ -6,14 +6,17 @@ from automat import MethodicalMachine
 
 class TCP(object):
     """
-    
+    A L{TCP} represents a single connection's TCP-over-UDP state machine.
     """
 
     _machine = MethodicalMachine()
 
     def __init__(self, impl):
         """
-        
+        Initialize a L{TCP}.
+
+        @param impl: The implementation of packet-sending.
+        @type impl: L{vertex.ptcp.PTCPConnection}
         """
         self._impl = impl
         self.ackPredicate = lambda packet: False
@@ -21,7 +24,8 @@ class TCP(object):
     @_machine.state(initial=True)
     def closed(self):
         """
-        
+        The initial state where our state-machine starts, and where it ends;
+        the connection is closed or does not exist yet.
         """
 
     # This isn't detailed by the spec in the diagram, so we use a different
@@ -32,13 +36,14 @@ class TCP(object):
     @_machine.state()
     def synSent(self):
         """
-        
+        The state in which we have sent a SYN packet to our peer, but have not
+        received anything back yet.
         """
 
     @_machine.state()
     def synRcvd(self):
         """
-        
+        The state in which we have received a SYN packet from our peer, 
         """
 
     @_machine.state()
