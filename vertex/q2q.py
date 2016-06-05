@@ -2033,7 +2033,7 @@ class _pemmap(object):
 
     def file(self, name, mode):
         try:
-            return file(os.path.join(self.pathname, name)+'.pem', mode)
+            return open(os.path.join(self.pathname, name)+'.pem', mode)
         except IOError as ioe:
             raise KeyError(name, ioe)
 
@@ -2149,7 +2149,8 @@ class PTCPConnectionDispatcher(object):
         self.factory = factory
         self._ports = {}
 
-    def seedNAT(self, (host, port), sourcePort=0, conditional=True):
+    def seedNAT(self, hostport, sourcePort=0, conditional=True):
+        (host, port) = hostport
         if sourcePort not in self._ports:
             if sourcePort != 0:
                 if conditional:
