@@ -498,7 +498,7 @@ class RPTCPConnectionAttempt(AbstractConnectionAttempt):
         if not self.cancelled:
             self.q2qproto.service.dispatcher.unbindPort(self.newPort)
         else:
-            print 'totally wacky, [rptcp] cancelled twice!'
+            print('totally wacky, [rptcp] cancelled twice!')
         AbstractConnectionAttempt.cancel(self)
 
 
