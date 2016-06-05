@@ -645,7 +645,7 @@ class Identify(Command):
 
 class BindUDP(Command):
     """
-    See UDPXMethod
+    See L{PTCPMethod}
     """
 
     commandName = 'bind-udp'
