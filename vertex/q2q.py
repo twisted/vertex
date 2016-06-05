@@ -12,6 +12,7 @@ import struct
 import datetime
 import time
 from collections import namedtuple
+from functools import total_ordering
 
 from pprint import pformat
 
@@ -72,6 +73,8 @@ class IgnoreConnectionFailed(protocol.ClientFactory):
     def buildProtocol(self, addr):
         return self.realFactory.buildProtocol(addr)
 
+
+@total_ordering
 class Q2QAddress(object):
     def __init__(self, domain, resource=None):
         self.resource = resource
@@ -114,10 +117,41 @@ class Q2QAddress(object):
         """
         return cert.getSubject().commonName == str(self)
 
-    def __cmp__(self, other):
+
+    def _tupleme(self):
+        """
+        L{Q2QAddress}es sort by domain, then by resource.
+        """
+        return (self.domain, self.resource)
+
+
+    def __lt__(self, other):
+        """
+        Is this less than something?
+
+        @param other: the thing that this is maybe less than
+        @type other: maybe L{Q2QAddress}?  who knows
+
+        @return: L{True} or L{False}
+        """
         if not isinstance(other, Q2QAddress):
-            return cmp(self.__class__, other.__class__)
-        return cmp((self.domain, self.resource), (other.domain, other.resource))
+            return NotImplemented
+        return (self._tupleme() < other._tupleme())
+
+
+    def __eq__(self, other):
+        """
+        Is this equal to something?
+
+        @param other: the thing that this is maybe equal to
+        @type other: maybe L{Q2QAddress}?  who knows
+
+        @return: L{True} or L{False}
+        """
+        if not isinstance(other, Q2QAddress):
+            return NotImplemented
+        return (self._tupleme() == other._tupleme())
+
 
     def __iter__(self):
         return iter((self.resource, self.domain))
