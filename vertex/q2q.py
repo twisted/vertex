@@ -2034,7 +2034,7 @@ class _pemmap(object):
     def file(self, name, mode):
         try:
             return file(os.path.join(self.pathname, name)+'.pem', mode)
-        except IOError, ioe:
+        except IOError as ioe:
             raise KeyError(name, ioe)
 
     def __setitem__(self, key, cert):
