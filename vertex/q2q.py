@@ -2239,6 +2239,22 @@ class PTCPConnectionDispatcher(object):
 
 
 class Q2QService(service.MultiService, protocol.ServerFactory):
+    """
+    A L{Q2QService} is all the stuff you need to speak Q2Q.
+
+    This service can be started and stopped to manage all the ancillary
+    resources associated with speaking the Q2Q protocol, including a shared
+    listening UDP port, TCP port, any outgoing connections that are required,
+    et cetera.  It is used for both clients and servers.
+
+    @ivar sharedUDPPortnum: The port number of the shared UDP port number which
+        is used for peer-to-peer connections.  This port will only work with
+        the various types of "cone" NAT, i.e. not symmetric NAT: U{see this
+        reference for methods of translation
+        <https://en.wikipedia.org/wiki/Network_address_translation
+        #Methods_of_translation>}.
+    @type sharedUDPPortnum: L{int}
+    """
     # server factory stuff
     publicIP = None
     _publicIPIsReallyPrivate = False
