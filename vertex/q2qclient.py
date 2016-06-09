@@ -159,6 +159,14 @@ class ClientCertificateStore(q2q.DirectoryCertificateStore):
 
 
 class ClientQ2QService(q2q.Q2QService):
+    """
+    This variant is used by Q2Q clients.
+
+    It is I{almost} exactly the same as L{q2q.Q2QService}, except for
+    implementing a query for a default C{From} address for client connections,
+    since a client service will generally only register for a single C{From}
+    address.
+    """
     def __init__(self, certspath, *a, **kw):
         q2q.Q2QService.__init__(self,
                                 certificateStorage=ClientCertificateStore(certspath),
