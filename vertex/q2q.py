@@ -2280,7 +2280,6 @@ class Q2QService(service.MultiService, protocol.ServerFactory):
         not.  For testing purposes only.
         """
         return itertools.chain(
-            self.appConnectionCache.cachedConnections.itervalues(),
             self.secureConnectionCache.cachedConnections.itervalues(),
             iter(self.subConnections),
             (self.dispatcher or ()) and self.dispatcher.iterconnections())
@@ -2346,7 +2345,6 @@ class Q2QService(service.MultiService, protocol.ServerFactory):
         if verifyHook is not None:
             self.verifyHook = verifyHook
 
-        self.appConnectionCache = ConnectionCache()
         self.secureConnectionCache = ConnectionCache()
 
         service.MultiService.__init__(self)
@@ -2563,7 +2561,6 @@ class Q2QService(service.MultiService, protocol.ServerFactory):
             dl.append(defer.maybeDeferred(self.inboundTCPPort.stopListening))
         if self.dispatcher is not None:
             dl.append(self.dispatcher.killAllConnections())
-        dl.append(self.appConnectionCache.shutdown())
         dl.append(self.secureConnectionCache.shutdown())
         dl.append(defer.maybeDeferred(service.MultiService.stopService, self))
         for conn in self.subConnections:
