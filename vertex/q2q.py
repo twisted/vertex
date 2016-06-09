@@ -909,6 +909,8 @@ class Q2Q(AMP, subproducer.SuperProducer):
         ""
         self.connectionObservers.append(observer)
 
+
+    @BindUDP.responder
     def _bindUDP(self, q2qsrc, q2qdst, udpsrc, udpdst, protocol):
 
         # we are representing the src, because they are the ones being told to
@@ -957,8 +959,8 @@ class Q2Q(AMP, subproducer.SuperProducer):
         # print 'conn-error'
         raise ConnectionError("unable to find appropriate UDP binder")
 
-    BindUDP.responder(_bindUDP)
 
+    @Identify.responder
     def _identify(self, subject):
         """
         Implementation of L{Identify}.
@@ -968,7 +970,6 @@ class Q2Q(AMP, subproducer.SuperProducer):
         )
         ourCA = Certificate(ourPrivateCert.original)
         return dict(certificate=ourCA)
-    Identify.responder(_identify)
 
 
     def verifyCertificateAllowed(self,
@@ -1121,6 +1122,7 @@ class Q2Q(AMP, subproducer.SuperProducer):
             (ourCert, peerCert,
              ourAddress, theirAddress))
 
+    @Listen.responder
     def _listen(self, protocols, From, description):
         """
         Implementation of L{Listen}.
@@ -1142,9 +1144,9 @@ class Q2Q(AMP, subproducer.SuperProducer):
             self.listeningClient.append((key, value))
             self.service.listeningClients.setdefault(key, []).append(value)
         return {}
-    Listen.responder(_listen)
 
 
+    @Inbound.responder
     def _inbound(self, From, to, protocol, udp_source=None):
         """
         Implementation of L{Inbound}.
@@ -1159,7 +1161,6 @@ class Q2Q(AMP, subproducer.SuperProducer):
                                                      protocol,
                                                      udp_source).addErrback(
             lambda f: f.trap(KeyError) and dict(listeners=[]))
-    Inbound.responder(_inbound)
 
     def _inboundimpl(self, ign, From, to, protocol, udp_source):
 
@@ -1295,10 +1296,12 @@ class Q2Q(AMP, subproducer.SuperProducer):
     def _determinePrivateIP(self):
         return self.transport.getHost().host
 
+
+    @SourceIP.responder
     def _sourceIP(self):
         result = {'ip': self.transport.getPeer().host}
         return result
-    SourceIP.responder(_sourceIP)
+
 
     def _resume(self, connection, data, writeDeferred):
         try:
@@ -1309,18 +1312,18 @@ class Q2Q(AMP, subproducer.SuperProducer):
             writeDeferred.callback({})
 
 
+    @Choke.responder
     def _choke(self, id):
         connection = self.connections[id]
         connection.choke()
         return {}
-    Choke.responder(_choke)
 
 
+    @Unchoke.responder
     def _unchoke(self, id):
         connection = self.connections[id]
         connection.unchoke()
         return {}
-    Unchoke.responder(_unchoke)
 
 
     def amp_WRITE(self, box):
@@ -1373,6 +1376,7 @@ class Q2Q(AMP, subproducer.SuperProducer):
         return AmpBox()
 
 
+    @Sign.responder
     def _sign(self, certificate_request, password):
         """
         Respond to a request to sign a CSR for a user or agent located within
@@ -1409,9 +1413,9 @@ class Q2Q(AMP, subproducer.SuperProducer):
                     certificate_request, ourCert, ser))
 
         return D.addCallback(_)
-    Sign.responder(_sign)
 
 
+    @Secure.responder
     def _secure(self, to, From, authorize):
         """
         Response to a SECURE command, starting TLS when necessary, and using a
@@ -1456,7 +1460,6 @@ class Q2Q(AMP, subproducer.SuperProducer):
         D.addCallback(hadCert)
 
         return D
-    Secure.responder(_secure)
 
     _cachedUnrequested = False
 
@@ -1547,6 +1550,7 @@ class Q2Q(AMP, subproducer.SuperProducer):
             to=toAddress,
             authorize=authorize, **extra).addCallback(_cbSecure)
 
+    @Virtual.responder
     def _virtual(self, id):
         if self.isServer:
             assert id > 0
@@ -1558,8 +1562,6 @@ class Q2Q(AMP, subproducer.SuperProducer):
 
 
         return dict(__transport__=tpt)
-
-    Virtual.responder(_virtual)
 
 
     # Client/Support methods.
@@ -1806,12 +1808,12 @@ class Q2QBootstrap(AMP):
         return self.callRemote(WhoAmI).addCallback(cbWhoAmI)
 
 
+    @WhoAmI.responder
     def _whoami(self):
         peer = self.transport.getPeer()
         return {
             'address': (peer.host, peer.port),
             }
-    WhoAmI.responder(_whoami)
 
 
     def retrieveConnection(self, identifier, factory):
