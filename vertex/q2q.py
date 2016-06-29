@@ -664,7 +664,8 @@ def safely(f, *a, **k):
         log.err()
 
 class Q2Q(AMP, subproducer.SuperProducer):
-    """ Quotient to Quotient protocol.
+    """
+    Quotient to Quotient protocol.
 
     At a low level, this uses a protocol called 'Juice' (JUice Is Concurrent
     Events), which is a simple rfc2822-inspired (although not -compliant)
@@ -675,11 +676,21 @@ class Q2Q(AMP, subproducer.SuperProducer):
     protocols after an initial handshake.
 
     @ivar publicIP: The IP that the other end of the connection claims to know
-    us by.  This will be used when responding to L{Inbound} commands if the Q2Q
-    service I am attached to does not specify a public IP to use.
+        us by.  This will be used when responding to L{Inbound} commands if the
+        Q2Q service I am attached to does not specify a public IP to use.
 
     @ivar authorized: A boolean indicating whether SSL verification has taken
-    place to ensure that this connection's peer has claimed an accurate identity.
+        place to ensure that this connection's peer has claimed an accurate
+        identity.
+
+    @ivar isServer: Set externally by L{Q2QService.buildProtocol} and
+        L{Q2QClientFactory}; is this Q2Q answering a server connection?
+    @type isServer: L{True} or L{False}
+
+    @ivar service: Set externally by L{Q2QClientFactory.buildProtocol} and
+        L{Q2QService.buildProtocol}; a reference to the L{Q2QService} managing
+        this connection.
+    @type service: L{Q2QService}
     """
 
     protocolName = 'q2q'
@@ -687,12 +698,13 @@ class Q2Q(AMP, subproducer.SuperProducer):
     publicIP = None
     authorized = False
 
-    def __init__(self, *a, **kw):
-        """ Q2Q instances should only be created by Q2QService.  See
+    def __init__(self, **kw):
+        """
+        Q2Q instances should only be created by Q2QService.  See
         L{Q2QService.connectQ2Q} and L{Q2QService.listenQ2Q}.
         """
         subproducer.SuperProducer.__init__(self)
-        AMP.__init__(self, *a, **kw)
+        AMP.__init__(self, **kw)
 
     def connectionMade(self):
         self.producingTransports = {}
