@@ -39,7 +39,7 @@ class _BinaryLoadable(String):
 
 class CertReq(_BinaryLoadable):
     """
-    Amp Argument that serializes and deserializes L{CertificateRequest}s 
+    Amp Argument that serializes and deserializes L{CertificateRequest}s
     """
 
     loader = CertificateRequest
