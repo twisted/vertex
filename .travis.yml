@@ -13,6 +13,7 @@ install:
   - pip install pyflakes
   - pip install codecov
   - pip install pretend
+  - pip install git+https://github.com/twisted/twistedchecker@9cec9f5b40d1b5cb4d6dcda26ec0ba6e05de4b62#egg=twistedchecker
   - pip install .
 
 matrix:
