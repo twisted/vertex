@@ -2,6 +2,7 @@
 case "${TOXENV}" in
     lint)
         pyflakes vertex bin prime
+        rm -fr .baseline
         mkdir .baseline
         (
             cd .baseline
