@@ -15,13 +15,16 @@ install:
   - pip install pretend
   - pip install .
 
+matrix:
+  include:
+    - python: 2.7
+      env: TOXENV=py27
+    - python: 2.7
+      env: TOXENV=lint
+
 # no pep8, since vertex uses twisted pep8
 script:
-  - python -c "import vertex"
-  - python -c "from vertex import scripts"
-  - python -c "from vertex import test"
-  - pyflakes vertex bin prime
-  - coverage run `which trial` vertex
+  ./.travis/run.sh
 
 after_success:
   - codecov
