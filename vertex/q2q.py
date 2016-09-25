@@ -509,7 +509,8 @@ def safely(f, *a, **k):
         log.err()
 
 class Q2Q(AMP, subproducer.SuperProducer):
-    """ Quotient to Quotient protocol.
+    """
+    Quotient to Quotient protocol.
 
     At a low level, this uses a protocol called 'Juice' (JUice Is Concurrent
     Events), which is a simple rfc2822-inspired (although not -compliant)
@@ -520,11 +521,21 @@ class Q2Q(AMP, subproducer.SuperProducer):
     protocols after an initial handshake.
 
     @ivar publicIP: The IP that the other end of the connection claims to know
-    us by.  This will be used when responding to L{Inbound} commands if the Q2Q
-    service I am attached to does not specify a public IP to use.
+        us by.  This will be used when responding to L{Inbound} commands if the
+        Q2Q service I am attached to does not specify a public IP to use.
 
     @ivar authorized: A boolean indicating whether SSL verification has taken
-    place to ensure that this connection's peer has claimed an accurate identity.
+        place to ensure that this connection's peer has claimed an accurate
+        identity.
+
+    @ivar isServer: Set externally by L{Q2QService.buildProtocol} and
+        L{Q2QClientFactory}; is this Q2Q answering a server connection?
+    @type isServer: L{True} or L{False}
+
+    @ivar service: Set externally by L{Q2QClientFactory.buildProtocol} and
+        L{Q2QService.buildProtocol}; a reference to the L{Q2QService} managing
+        this connection.
+    @type service: L{Q2QService}
     """
 
     protocolName = 'q2q'
@@ -532,12 +543,13 @@ class Q2Q(AMP, subproducer.SuperProducer):
     publicIP = None
     authorized = False
 
-    def __init__(self, *a, **kw):
-        """ Q2Q instances should only be created by Q2QService.  See
+    def __init__(self, **kw):
+        """
+        Q2Q instances should only be created by Q2QService.  See
         L{Q2QService.connectQ2Q} and L{Q2QService.listenQ2Q}.
         """
         subproducer.SuperProducer.__init__(self)
-        AMP.__init__(self, *a, **kw)
+        AMP.__init__(self, **kw)
 
     def connectionMade(self):
         self.producingTransports = {}
@@ -576,6 +588,8 @@ class Q2Q(AMP, subproducer.SuperProducer):
         ""
         self.connectionObservers.append(observer)
 
+
+    @BindUDP.responder
     def _bindUDP(self, q2qsrc, q2qdst, udpsrc, udpdst, protocol):
 
         # we are representing the src, because they are the ones being told to
@@ -624,8 +638,8 @@ class Q2Q(AMP, subproducer.SuperProducer):
         # print 'conn-error'
         raise ConnectionError("unable to find appropriate UDP binder")
 
-    BindUDP.responder(_bindUDP)
 
+    @Identify.responder
     def _identify(self, subject):
         """
         Implementation of L{Identify}.
@@ -635,7 +649,6 @@ class Q2Q(AMP, subproducer.SuperProducer):
         )
         ourCA = Certificate(ourPrivateCert.original)
         return dict(certificate=ourCA)
-    Identify.responder(_identify)
 
 
     def verifyCertificateAllowed(self,
@@ -788,6 +801,7 @@ class Q2Q(AMP, subproducer.SuperProducer):
             (ourCert, peerCert,
              ourAddress, theirAddress))
 
+    @Listen.responder
     def _listen(self, protocols, From, description):
         """
         Implementation of L{Listen}.
@@ -809,9 +823,9 @@ class Q2Q(AMP, subproducer.SuperProducer):
             self.listeningClient.append((key, value))
             self.service.listeningClients.setdefault(key, []).append(value)
         return {}
-    Listen.responder(_listen)
 
 
+    @Inbound.responder
     def _inbound(self, From, to, protocol, udp_source=None):
         """
         Implementation of L{Inbound}.
@@ -826,7 +840,6 @@ class Q2Q(AMP, subproducer.SuperProducer):
                                                      protocol,
                                                      udp_source).addErrback(
             lambda f: f.trap(KeyError) and dict(listeners=[]))
-    Inbound.responder(_inbound)
 
     def _inboundimpl(self, ign, From, to, protocol, udp_source):
 
@@ -962,10 +975,12 @@ class Q2Q(AMP, subproducer.SuperProducer):
     def _determinePrivateIP(self):
         return self.transport.getHost().host
 
+
+    @SourceIP.responder
     def _sourceIP(self):
         result = {'ip': self.transport.getPeer().host}
         return result
-    SourceIP.responder(_sourceIP)
+
 
     def _resume(self, connection, data, writeDeferred):
         try:
@@ -976,18 +991,18 @@ class Q2Q(AMP, subproducer.SuperProducer):
             writeDeferred.callback({})
 
 
+    @Choke.responder
     def _choke(self, id):
         connection = self.connections[id]
         connection.choke()
         return {}
-    Choke.responder(_choke)
 
 
+    @Unchoke.responder
     def _unchoke(self, id):
         connection = self.connections[id]
         connection.unchoke()
         return {}
-    Unchoke.responder(_unchoke)
 
 
     def amp_WRITE(self, box):
@@ -1040,6 +1055,7 @@ class Q2Q(AMP, subproducer.SuperProducer):
         return AmpBox()
 
 
+    @Sign.responder
     def _sign(self, certificate_request, password):
         """
         Respond to a request to sign a CSR for a user or agent located within
@@ -1076,9 +1092,9 @@ class Q2Q(AMP, subproducer.SuperProducer):
                     certificate_request, ourCert, ser))
 
         return D.addCallback(_)
-    Sign.responder(_sign)
 
 
+    @Secure.responder
     def _secure(self, to, From, authorize):
         """
         Response to a SECURE command, starting TLS when necessary, and using a
@@ -1123,7 +1139,6 @@ class Q2Q(AMP, subproducer.SuperProducer):
         D.addCallback(hadCert)
 
         return D
-    Secure.responder(_secure)
 
     _cachedUnrequested = False
 
@@ -1214,6 +1229,7 @@ class Q2Q(AMP, subproducer.SuperProducer):
             to=toAddress,
             authorize=authorize, **extra).addCallback(_cbSecure)
 
+    @Virtual.responder
     def _virtual(self, id):
         if self.isServer:
             assert id > 0
@@ -1225,8 +1241,6 @@ class Q2Q(AMP, subproducer.SuperProducer):
 
 
         return dict(__transport__=tpt)
-
-    Virtual.responder(_virtual)
 
 
     # Client/Support methods.
@@ -1466,12 +1480,12 @@ class Q2QBootstrap(AMP):
         return self.callRemote(WhoAmI).addCallback(cbWhoAmI)
 
 
+    @WhoAmI.responder
     def _whoami(self):
         peer = self.transport.getPeer()
         return {
             'address': (peer.host, peer.port),
             }
-    WhoAmI.responder(_whoami)
 
 
     def retrieveConnection(self, identifier, factory):
@@ -1889,6 +1903,22 @@ class PTCPConnectionDispatcher(object):
 
 
 class Q2QService(service.MultiService, protocol.ServerFactory):
+    """
+    A L{Q2QService} is all the stuff you need to speak Q2Q.
+
+    This service can be started and stopped to manage all the ancillary
+    resources associated with speaking the Q2Q protocol, including a shared
+    listening UDP port, TCP port, any outgoing connections that are required,
+    et cetera.  It is used for both clients and servers.
+
+    @ivar sharedUDPPortnum: The port number of the shared UDP port number which
+        is used for peer-to-peer connections.  This port will only work with
+        the various types of "cone" NAT, i.e. not symmetric NAT: U{see this
+        reference for methods of translation
+        <https://en.wikipedia.org/wiki/Network_address_translation
+        #Methods_of_translation>}.
+    @type sharedUDPPortnum: L{int}
+    """
     # server factory stuff
     publicIP = None
     _publicIPIsReallyPrivate = False
@@ -1914,7 +1944,6 @@ class Q2QService(service.MultiService, protocol.ServerFactory):
         not.  For testing purposes only.
         """
         return itertools.chain(
-            self.appConnectionCache.cachedConnections.itervalues(),
             self.secureConnectionCache.cachedConnections.itervalues(),
             iter(self.subConnections),
             (self.dispatcher or ()) and self.dispatcher.iterconnections())
@@ -1980,7 +2009,6 @@ class Q2QService(service.MultiService, protocol.ServerFactory):
         if verifyHook is not None:
             self.verifyHook = verifyHook
 
-        self.appConnectionCache = ConnectionCache()
         self.secureConnectionCache = ConnectionCache()
 
         service.MultiService.__init__(self)
@@ -2203,7 +2231,6 @@ class Q2QService(service.MultiService, protocol.ServerFactory):
             dl.append(defer.maybeDeferred(self.inboundTCPPort.stopListening))
         if self.dispatcher is not None:
             dl.append(self.dispatcher.killAllConnections())
-        dl.append(self.appConnectionCache.shutdown())
         dl.append(self.secureConnectionCache.shutdown())
         dl.append(defer.maybeDeferred(service.MultiService.stopService, self))
         for conn in self.subConnections:

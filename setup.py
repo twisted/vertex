@@ -12,7 +12,12 @@ setup(
     maintainer_email="vertex-dev@twistedmatrix.com",
     url="https://github.com/twisted/vertex",
     scripts=["bin/gvertex", "bin/vertex"],
-    install_requires=['Twisted>=13.1.0', 'pyOpenSSL>=0.13'],
+    install_requires=[
+        'Twisted>=13.1.0',
+        'pyOpenSSL>=0.13',
+        'automat',
+        'pretend',
+    ],
     license="MIT",
     platforms=["any"],
     description=
