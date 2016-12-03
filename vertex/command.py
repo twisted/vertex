@@ -192,6 +192,7 @@ class Sign(Command):
               BadCertificateRequest: "BadCertificateRequest"}
 
 
+
 class Choke(Command):
     """
     Flow control: ask the peer to stop sending data over this virtual channel.
