@@ -14,8 +14,7 @@ setup(
     scripts=["bin/gvertex", "bin/vertex"],
     install_requires=[
         'attrs',
-        'Twisted>=13.1.0',
-        'pyOpenSSL>=0.13',
+        'Twisted[tls]>=16.6.0',
         'automat',
         'pretend',
         'txscrypt',

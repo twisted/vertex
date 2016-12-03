@@ -33,10 +33,10 @@ from twisted.cred.portal import IRealm, Portal
 from twisted.cred.credentials import IUsernamePassword, UsernamePassword
 from twisted.cred.error import UnauthorizedLogin
 
-from twisted.protocols.amp import Argument, Boolean, Integer, String, Unicode, ListOf, AmpList
-from twisted.protocols.amp import AmpBox, Command, StartTLS, ProtocolSwitchCommand, AMP
-from twisted.protocols.amp import _objectsToStrings
-import txscrypt
+from twisted.protocols.amp import (
+    Argument, Boolean, String, Unicode, ListOf, AmpList, AmpBox, Command,
+    StartTLS, ProtocolSwitchCommand, AMP
+)
 
 # vertex
 from vertex import subproducer, ptcp
@@ -45,7 +45,11 @@ from vertex.address import (
     Q2QTransportAddress, VirtualTransportAddress, Q2QAddress
     )
 from vertex.amputil import (
-    AmpTime, Cert, CertReq, HostPort, Q2QAddressArgument
+    AmpTime, Cert, HostPort, Q2QAddressArgument
+    )
+from vertex.command import (
+    Sign, Listen, Virtual, Identify, BindUDP, SourceIP,
+    Choke, Unchoke, WhoAmI
     )
 from vertex.conncache import ConnectionCache
 
@@ -53,23 +57,12 @@ from vertex.conncache import ConnectionCache
 import attr
 import txscrypt
 
+from vertex.exceptions import (
+    BadCertificateRequest, VerifyError, ConnectionError,
+    AttemptsFailed, NoAttemptsMade
+    )
 
 port = 8788
-
-class ConnectionError(Exception):
-    pass
-
-class AttemptsFailed(ConnectionError):
-    pass
-
-class NoAttemptsMade(ConnectionError):
-    pass
-
-class VerifyError(Exception):
-    pass
-
-class BadCertificateRequest(VerifyError):
-    pass
 
 class IgnoreConnectionFailed(protocol.ClientFactory):
     def __init__(self, realFactory):
@@ -443,122 +436,6 @@ class Secure(StartTLS):
         ('authorize', Boolean())
         ]
 
-
-
-class Listen(Command):
-    """
-    A simple command for registering interest with an active Q2Q connection
-    to hear from a server when others come calling.  An occurrence of this
-    command might have this appearance on the wire::
-
-        C: -Command: Listen
-        C: -Ask: 1
-        C: From: glyph@divmod.com
-        C: Protocols: q2q-example, q2q-example2
-        C: Description: some simple protocols
-        C:
-        S: -Answer: 1
-        S:
-
-    This puts some state on the server side that will affect any Connect
-    commands with q2q-example or q2q-example2 in the Protocol: header.
-    """
-
-    commandName = 'listen'
-    arguments = [
-        ('From', Q2QAddressArgument()),
-        ('protocols', ListOf(String())),
-        ('description', Unicode())]
-
-    result = []
-
-class ConnectionStartBox(AmpBox):
-    def __init__(self, __transport):
-        super(ConnectionStartBox, self).__init__()
-        self.virtualTransport = __transport
-
-    # XXX Overriding a private interface
-    def _sendTo(self, proto):
-        super(ConnectionStartBox, self)._sendTo(proto)
-        self.virtualTransport.startProtocol()
-
-class Virtual(Command):
-    commandName = 'virtual'
-    result = []
-
-    arguments = [('id', Integer())]
-
-    def makeResponse(cls, objects, proto):
-        tpt = objects.pop('__transport__')
-        # XXX Using a private API
-        return _objectsToStrings(
-            objects, cls.response,
-            ConnectionStartBox(tpt),
-            proto)
-
-    makeResponse = classmethod(makeResponse)
-
-class Identify(Command):
-    """
-    Respond to an IDENTIFY command with a self-signed certificate for the
-    domain requested, assuming we are an authority for said domain.  An
-    occurrence of this command might have this appearance on the wire::
-
-        C: -Command: Identify
-        C: -Ask: 1
-        C: Domain: divmod.com
-        C:
-        S: -Answer: 1
-        S: Certificate: <<<base64-encoded self-signed certificate of divmod.com>>>
-        S:
-
-    """
-
-    commandName = 'identify'
-
-    arguments = [('subject', Q2QAddressArgument())]
-
-    response = [('certificate', Cert())]
-
-class BindUDP(Command):
-    """
-    See L{PTCPMethod}
-    """
-
-    commandName = 'bind-udp'
-
-    arguments = [
-        ('protocol', String()),
-        ('q2qsrc', Q2QAddressArgument()),
-        ('q2qdst', Q2QAddressArgument()),
-        ('udpsrc', HostPort()),
-        ('udpdst', HostPort()),
-        ]
-
-    errors = {ConnectionError: 'ConnectionError'}
-
-    response = []
-
-class SourceIP(Command):
-    """
-    Ask a server on the public internet what my public IP probably is.  An
-    occurrence of this command might have this appearance on the wire::
-
-        C: -Command: Source-IP
-        C: -Ask: 1
-        C:
-        S: -Answer: 1
-        S: IP: 4.3.2.1
-        S:
-
-    """
-
-    commandName = 'source-ip'
-
-    arguments = []
-
-    response = [('ip', String())]
-
 class Inbound(Command):
     """
     Request information about where to connect to a particular resource.
@@ -649,32 +526,6 @@ class Outbound(Command):
     response = []
 
     errors = {AttemptsFailed: 'AttemptsFailed'}
-
-class Sign(Command):
-    commandName = 'sign'
-    arguments = [('certificate_request', CertReq()),
-                 ('password', String())]
-
-    response = [('certificate', Cert())]
-
-    errors = {KeyError: "NoSuchUser",
-              BadCertificateRequest: "BadCertificateRequest"}
-
-class Choke(Command):
-    """Ask our peer to be quiet for a while.
-    """
-    commandName = 'Choke'
-    arguments = [('id', Integer())]
-    requiresAnswer = False
-
-
-class Unchoke(Command):
-    """Reverse the effects of a choke.
-    """
-    commandName = 'Unchoke'
-    arguments = [('id', Integer())]
-    requiresAnswer = False
-
 
 def safely(f, *a, **k):
     """try/except around something, w/ twisted error handling.
@@ -1624,13 +1475,6 @@ class SeparateConnectionTransport(object):
             self.subProtocol.connectionLost(reason)
             self.subProtocol = None
 
-class WhoAmI(Command):
-    commandName = 'Who-Am-I'
-
-    response = [
-        ('address', HostPort()),
-        ]
-
 class RetrieveConnection(ProtocolSwitchCommand):
     commandName = 'Retrieve-Connection'
 
@@ -2009,14 +1853,6 @@ class Q2QClientFactory(protocol.ClientFactory):
         p.wrapper = self.service.wrapper
         return p
 
-
-class YourAddress(Command):
-    arguments = [
-        ('address', HostPort()),
-        ]
-
-
-
 class AddressDiscoveryProtocol(Q2QBootstrap):
     def __init__(self, addrDiscDef):
         Q2QBootstrap.__init__(self)
@@ -2311,20 +2147,27 @@ class Q2QService(service.MultiService, protocol.ServerFactory):
         fakecert = certpair(ssigned, kp)
         apc = self.certificateStorage.addPrivateCertificate
 
-        def _2(secured):
-            D = secured.callRemote(
+        gettingSecureConnection = self.getSecureConnection(
+            fromAddress, fromAddress.domainAddress(), authorize=False,
+            usePrivateCertificate=fakecert,
+            )
+        def gotSecureConnection(secured):
+            return secured.callRemote(
                 Sign,
                 certificate_request=reqobj,
                 password=sharedSecret)
-            def _1(dcert):
-                cert = dcert['certificate']
-                privcert = certpair(cert, kp)
-                apc(str(fromAddress), privcert)
-            return D.addCallback(_1)
+        gettingSecureConnection.addCallback(gotSecureConnection)
+        def gotSignResponse(signResponse):
+            cert = signResponse['certificate']
+            privcert = certpair(cert, kp)
+            apc(str(fromAddress), privcert)
+        gettingSecureConnection.addCallback(gotSignResponse)
+
         return self.getSecureConnection(
             fromAddress, fromAddress.domainAddress(), authorize=False,
             usePrivateCertificate=fakecert,
-            ).addCallback(_2)
+        ).addCallback(gotSecureConnection)
+
 
     def authorize(self, fromAddress, password):
         """To-be-deprecated synonym for requestCertificateForAddress
