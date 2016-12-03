@@ -29,6 +29,21 @@ class IQ2QUser(Interface):
         certificateRequest are valid.
         """
 
+class IQ2QUserStore(Interface):
+    """
+    A store of L{IQ2QUser} providers.
+    """
+    def store(self, domain, username, password):
+        """
+        Store a username and password for a domain.
+        """
+
+    def check(self, domain, username, password):
+        """
+        Check
+        """
+
+
 class IFileTransfer(Interface):
 
     def getUploadSink(self, path):

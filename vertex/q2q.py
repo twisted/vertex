@@ -8,6 +8,7 @@ I{Quotient to Quotient} protocol implementation.
 # stdlib
 import itertools
 from hashlib import md5
+import operator
 import struct
 import datetime
 import time
@@ -15,7 +16,7 @@ from collections import namedtuple
 
 from pprint import pformat
 
-from zope.interface import implements
+from zope.interface import implements, implementer
 
 # twisted
 from twisted.internet import reactor, defer, interfaces, protocol, error
@@ -35,6 +36,7 @@ from twisted.cred.error import UnauthorizedLogin
 from twisted.protocols.amp import Argument, Boolean, Integer, String, Unicode, ListOf, AmpList
 from twisted.protocols.amp import AmpBox, Command, StartTLS, ProtocolSwitchCommand, AMP
 from twisted.protocols.amp import _objectsToStrings
+import txscrypt
 
 # vertex
 from vertex import subproducer, ptcp
@@ -46,6 +48,10 @@ from vertex.amputil import (
     AmpTime, Cert, CertReq, HostPort, Q2QAddressArgument
     )
 from vertex.conncache import ConnectionCache
+
+# extra
+import attr
+import txscrypt
 
 
 port = 8788
@@ -78,6 +84,21 @@ class IgnoreConnectionFailed(protocol.ClientFactory):
     def buildProtocol(self, addr):
         return self.realFactory.buildProtocol(addr)
 
+
+@implementer(IUsernamePassword)
+@attr.s
+class UsernameShadowPassword(object):
+    """
+    A L{IUsernamePassword} implementation that stores a key derived
+    from a password and not the password itself.
+    """
+    username = attr.ib()
+    password = attr.ib()
+    _keyDeriver = attr.ib(default=txscrypt)
+
+    def checkPassword(self, password):
+        # "password" is actually what we've stored
+        return self._keyDeriver.checkPassword(password, self.password)
 
 
 from twisted.internet import protocol
@@ -1235,8 +1256,7 @@ class Q2Q(AMP, subproducer.SuperProducer):
         ourCert = CS.getPrivateCertificate(domain)
 
         D = self.service.portal.login(
-            UsernamePassword(subj.commonName,
-                             password),
+            UsernameShadowPassword(subj.commonName, password),
             self,
             ivertex.IQ2QUser)
 
@@ -1809,6 +1829,22 @@ class DefaultQ2QAvatar:
         return newCert
 
 
+@implementer(ivertex.IQ2QUserStore)
+class _InMemoryUserStore(object):
+
+    def __init__(self, crypt=txscrypt):
+        self._crypt = crypt
+        self._keys = {}
+
+    def store(self, domain, username, password):
+        cryptDeferred = self._crypt.computeKey(password)
+        cryptDeferred.addCallback(self._keys.__setitem__,
+                                  (domain, username))
+        return cryptDeferred
+
+    def key(self, domain, username):
+        return self._keys.get((domain, username))
+
 
 class DefaultCertificateStore:
 
@@ -1823,32 +1859,29 @@ class DefaultCertificateStore:
 
     def requestAvatarId(self, credentials):
         username, domain = credentials.username.split("@")
-        pw = self.users.get((domain, username))
-        if pw is None:
-            return defer.fail(UnauthorizedLogin())
-        def _(passwordIsCorrect):
+        key = self.users.key(domain, username)
+        if key is None:
+            raise UnauthorizedLogin()
+
+        def _cbPasswordChecked(passwordIsCorrect):
             if passwordIsCorrect:
                 return username + '@' + domain
             else:
                 raise UnauthorizedLogin()
-        return defer.maybeDeferred(
-            credentials.checkPassword, pw).addCallback(_)
+
+        return defer.maybeDeferred(credentials.checkPassword,
+                                   key).addCallback(_cbPasswordChecked)
 
     def __init__(self):
         self.remoteStore = {}
         self.localStore = {}
-        self.users = {}
+        self.users = _InMemoryUserStore()
 
     def getSelfSignedCertificate(self, domainName):
         return defer.maybeDeferred(self.remoteStore.__getitem__, domainName)
 
     def addUser(self, domain, username, privateSecret):
-        self.users[domain, username] = privateSecret
-
-    def checkUser(self, domain, username, privateSecret):
-        if self.users.get((domain, username)) != privateSecret:
-            return defer.fail(KeyError())
-        return defer.succeed(True)
+        return self.users.store(domain, username, privateSecret)
 
     def storeSelfSignedCertificate(self, domainName, mainCert):
         """
@@ -2612,4 +2645,3 @@ class Q2QService(service.MultiService, protocol.ServerFactory):
                 extraHash=(cacheFrom, toDomain, authorize)
                 )
         return resolveme.addCallback(cb)
-

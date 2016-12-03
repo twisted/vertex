@@ -9,8 +9,14 @@ from twisted.cred.portal import Portal
 from twisted.protocols.amp import AMP, Box, parseString
 
 from vertex import q2q
+from vertex.ivertex import IQ2QUserStore
 from vertex.depserv import DependencyService, Conf
 from vertex.q2qadmin import AddUser, NotAllowed
+
+import attr
+import txscrypt
+
+from zope.interface import implementer
 
 
 class IdentityAdmin(AMP):
@@ -19,8 +25,9 @@ class IdentityAdmin(AMP):
     def command_ADD_USER(self, name, password):
         # all security is transport security
         theDomain = self.transport.getQ2QHost().domain
-        self.factory.store.addUser(theDomain, name, password)
-        return {}
+        userDeferred = self.factory.store.addUser(theDomain, name, password)
+        userDeferred.addCallback(lambda _: {})
+        return userDeferred
 
 
 class IdentityAdminFactory:
@@ -37,34 +44,43 @@ class IdentityAdminFactory:
             return [(self, "identity admin")]
         return []
 
-class _usermap:
-    def __init__(self, path):
-        self.path = path
 
-    def __setitem__(self, (domain, username), password):
+@implementer(IQ2QUserStore)
+@attr.s
+class _UserStore(object):
+    path = attr.ib()
+    _keyDeriver = attr.ib(default=txscrypt)
+
+    def store(self, domain, username, password):
         domainpath = os.path.join(self.path, domain)
         if not os.path.exists(domainpath):
             os.makedirs(domainpath)
         userpath = os.path.join(domainpath, username+".info")
         if os.path.exists(userpath):
             raise NotAllowed()
-        f = open(userpath, 'w')
-        f.write(Box(username=username,
-                    password=password.encode('hex')).serialize())
-        f.close()
 
-    def get(self, (domain, username)):
+        def _cbWriteIdentity(key):
+            with open(userpath, 'w') as f:
+                f.write(Box(username=username,
+                            key=key).serialize())
+
+        keyDeferred = self._keyDeriver.computeKey(password)
+        keyDeferred.addCallback(_cbWriteIdentity)
+        return keyDeferred
+
+    def key(self, domain, username):
         domainpath = os.path.join(self.path, domain)
+
         if os.path.exists(domainpath):
             filepath = os.path.join(domainpath, username+".info")
             if os.path.exists(filepath):
                 data = parseString(open(filepath).read())[0]
-                return data['password'].decode('hex')
+                return data['key']
 
 class DirectoryCertificateAndUserStore(q2q.DirectoryCertificateStore):
     def __init__(self, filepath):
         q2q.DirectoryCertificateStore.__init__(self, filepath)
-        self.users = _usermap(os.path.join(filepath, "users"))
+        self.users = _UserStore(os.path.join(filepath, "users"))
 
     def getPrivateCertificate(self, domain):
         try:

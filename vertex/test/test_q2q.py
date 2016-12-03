@@ -676,6 +676,7 @@ class TCPConnection(Q2QConnectionTestCase, ConnectionTestMixin):
     udpEnabled = False
     virtualEnabled = False
 
+
 # class LiveServerMixin:
 #     serverDomain = 'test.domain.example.com'
 

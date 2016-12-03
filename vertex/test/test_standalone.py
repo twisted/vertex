@@ -6,6 +6,7 @@ Tests for L{vertex.q2qstandalone}
 
 from pretend import call_recorder, call, stub
 
+from twisted.internet import defer
 from twisted.protocols.amp import AMP
 from twisted.test.iosim import connect, makeFakeClient, makeFakeServer
 from twisted.trial.unittest import TestCase
@@ -20,7 +21,9 @@ class AddUserAdminTests(TestCase):
     Tests that IdentityAdmin can successfully add a user
     """
     def setUp(self):
-        self.addUser = call_recorder(lambda *args, **kwargs: {})
+        self.addUser = call_recorder(
+            lambda *args, **kwargs: defer.succeed("ignored")
+        )
         store = stub(addUser=self.addUser)
         self.adminFactory = stub(store=store)
 

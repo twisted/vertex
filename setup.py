@@ -13,10 +13,12 @@ setup(
     url="https://github.com/twisted/vertex",
     scripts=["bin/gvertex", "bin/vertex"],
     install_requires=[
+        'attrs',
         'Twisted>=13.1.0',
         'pyOpenSSL>=0.13',
         'automat',
         'pretend',
+        'txscrypt',
     ],
     license="MIT",
     platforms=["any"],
