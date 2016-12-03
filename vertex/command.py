@@ -1,24 +1,53 @@
-# twisted
+# -*- test-case-name: vertex.test.test_q2q -*-
+# Copyright (c) Twisted Matrix Laboratories.
+# See LICENSE for details.
+
+"""
+AMP command definitions for the Q2Q protocol spoken by Vertex.
+"""
+
+# Twisted
 from twisted.protocols.amp import (
     AmpBox, String, Unicode, ListOf, Command,
     Integer, _objectsToStrings
     )
 
-# vertex
+# Vertex
 from vertex.amputil import (
     Cert, CertReq, HostPort, Q2QAddressArgument
     )
 from vertex.exceptions import ConnectionError, BadCertificateRequest
 
 class ConnectionStartBox(AmpBox):
-    def __init__(self, __transport):
-        super(ConnectionStartBox, self).__init__()
-        self.virtualTransport = __transport
+    """
+    An L{AmpBox} that, when sent, calls C{startProtocol} on the transport it
+    was sent on.
+    """
 
-    # XXX Overriding a private interface
+    def __init__(self, transport):
+        """
+        Create a L{ConnectionStartBox}.
+        """
+        super(ConnectionStartBox, self).__init__()
+        self.virtualTransport = transport
+
+
     def _sendTo(self, proto):
+        """
+        When sent, call the C{startProtocol} method on the virtual transport
+        object.
+
+        @see: L{vertex.ptcp.PTCP.startProtocol}
+
+        @see: L{vertex.q2q.VirtualTransport.startProtocol}
+
+        @param proto: the AMP protocol that this is being sent on.
+        """
+        # XXX This is overriding a private interface
         super(ConnectionStartBox, self)._sendTo(proto)
         self.virtualTransport.startProtocol()
+
+
 
 class Listen(Command):
     """
@@ -47,13 +76,30 @@ class Listen(Command):
 
     result = []
 
+
+
 class Virtual(Command):
+    """
+    Initiate a virtual multiplexed connection over this TCP connection.
+    """
     commandName = 'virtual'
     result = []
 
     arguments = [('id', Integer())]
 
     def makeResponse(cls, objects, proto):
+        """
+        Create a response dictionary using this L{Virtual} command's schema; do
+        the same thing as L{Command.makeResponse}, but additionally do
+        addition.
+
+        @param objects: The dictionary of strings mapped to Python objects.
+
+        @param proto: The AMP protocol that this command is serialized to.
+
+        @return: A L{ConnectionStartBox} containing the serialized form of
+            C{objects}.
+        """
         tpt = objects.pop('__transport__')
         # XXX Using a private API
         return _objectsToStrings(
@@ -62,6 +108,8 @@ class Virtual(Command):
             proto)
 
     makeResponse = classmethod(makeResponse)
+
+
 
 class Identify(Command):
     """
@@ -85,6 +133,8 @@ class Identify(Command):
 
     response = [('certificate', Cert())]
 
+
+
 class BindUDP(Command):
     """
     See L{PTCPMethod}
@@ -103,6 +153,8 @@ class BindUDP(Command):
     errors = {ConnectionError: 'ConnectionError'}
 
     response = []
+
+
 
 class SourceIP(Command):
     """
