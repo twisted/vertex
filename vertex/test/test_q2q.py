@@ -411,13 +411,18 @@ class ConnectionTestMixin:
                           privateSecret, serverService,
                           serverDomain):
         svc = self._makeQ2QService(username + '@' + serverDomain, None)
-        serverService.certificateStorage.addUser(serverDomain,
-                                                 username,
-                                                 privateSecret)
         svc.setServiceParent(self.msvc)
-        return svc.authorize(q2q.Q2QAddress(serverDomain, username),
-                             privateSecret).addCallback(lambda x: svc)
 
+        added = serverService.certificateStorage.addUser(serverDomain,
+                                                         username,
+                                                         privateSecret)
+
+        def _cbAuthorize(_):
+            return svc.authorize(q2q.Q2QAddress(serverDomain, username),
+                                 privateSecret).addCallback(lambda x: svc)
+
+        added.addCallback(_cbAuthorize)
+        return added
 
     def testListening(self):
         _1 = self.addClientService(self.toAddress, 'aaaa', self.serverService)
