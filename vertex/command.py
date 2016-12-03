@@ -176,7 +176,12 @@ class SourceIP(Command):
 
     response = [('ip', String())]
 
+
+
 class Sign(Command):
+    """
+    Request a certificate signature.
+    """
     commandName = 'sign'
     arguments = [('certificate_request', CertReq()),
                  ('password', String())]
@@ -186,28 +191,35 @@ class Sign(Command):
     errors = {KeyError: "NoSuchUser",
               BadCertificateRequest: "BadCertificateRequest"}
 
+
 class Choke(Command):
-    """Ask our peer to be quiet for a while.
+    """
+    Flow control: ask the peer to stop sending data over this virtual channel.
     """
     commandName = 'Choke'
     arguments = [('id', Integer())]
     requiresAnswer = False
 
+
+
 class Unchoke(Command):
-    """Reverse the effects of a choke.
+    """
+    Reverse of L{Choke}; flow may resume over this virtual channel.
     """
     commandName = 'Unchoke'
     arguments = [('id', Integer())]
     requiresAnswer = False
 
+
+
 class WhoAmI(Command):
+    """
+    Send a response identifying TCP host and port of the sender.  This is used
+    for NATed machines to identify themselves from the perspective of the
+    public Internet.
+    """
     commandName = 'Who-Am-I'
 
     response = [
-        ('address', HostPort()),
-        ]
-
-class YourAddress(Command):
-    arguments = [
         ('address', HostPort()),
         ]
