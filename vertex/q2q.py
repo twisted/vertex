@@ -1682,8 +1682,10 @@ class _InMemoryUserStore(object):
 
     def store(self, domain, username, password):
         cryptDeferred = self._crypt.computeKey(password)
-        cryptDeferred.addCallback(self._keys.__setitem__,
-                                  (domain, username))
+        def _cbStoreKey(key):
+            self._keys[(domain, username)] = key
+
+        cryptDeferred.addCallback(_cbStoreKey)
         return cryptDeferred
 
     def key(self, domain, username):
