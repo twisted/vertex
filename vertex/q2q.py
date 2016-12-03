@@ -32,8 +32,10 @@ from twisted.cred.portal import IRealm, Portal
 from twisted.cred.credentials import IUsernamePassword, UsernamePassword
 from twisted.cred.error import UnauthorizedLogin
 
-from twisted.protocols.amp import Argument, Boolean, String, Unicode, ListOf, AmpList
-from twisted.protocols.amp import AmpBox, Command, StartTLS, ProtocolSwitchCommand, AMP
+from twisted.protocols.amp import (
+    Argument, Boolean, String, Unicode, ListOf, AmpList, AmpBox, Command,
+    StartTLS, ProtocolSwitchCommand, AMP
+)
 
 # vertex
 from vertex import subproducer, ptcp
