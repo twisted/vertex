@@ -2163,12 +2163,8 @@ class Q2QService(service.MultiService, protocol.ServerFactory):
             cert = signResponse['certificate']
             privcert = certpair(cert, kp)
             apc(str(fromAddress), privcert)
-        gettingSecureConnection.addCallback(gotSignResponse)
-
-        return self.getSecureConnection(
-            fromAddress, fromAddress.domainAddress(), authorize=False,
-            usePrivateCertificate=fakecert,
-        ).addCallback(gotSecureConnection)
+            return signResponse
+        return gettingSecureConnection.addCallback(gotSignResponse)
 
 
     def authorize(self, fromAddress, password):
