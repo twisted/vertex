@@ -47,37 +47,52 @@ class IdentityAdminFactory:
         return []
 
 
+
 @implementer(IQ2QUserStore)
 @attr.s
 class _UserStore(object):
-    path = attr.ib()
+    """
+    A L{IQ2QUserStore} implementation that stores usernames, domains,
+    and keys derived from passwords in files.
+
+    @param path: Where to write user information.
+    @type path: L{str}
+
+    @param keyDeriver: An object whose C{computeKey} method
+        matches L{txscrypt.computeKey}
+    @type keyDeriver: L{txscrypt}
+    """
+
+    path = attr.ib(convert=FilePath)
     _keyDeriver = attr.ib(default=txscrypt)
 
+
     def store(self, domain, username, password):
-        domainpath = os.path.join(self.path, domain)
-        if not os.path.exists(domainpath):
-            os.makedirs(domainpath)
-        userpath = os.path.join(domainpath, username+".info")
-        if os.path.exists(userpath):
-            raise NotAllowed()
+        domainpath = self.path.child(domain)
+        domainpath.makedirs(ignoreExistingDirectory=True)
+        userpath = domainpath.child(username + ".info")
+        if userpath.exists():
+            return defer.fail(NotAllowed())
 
         def _cbWriteIdentity(key):
-            with open(userpath, 'w') as f:
+            with userpath.open('w') as f:
                 f.write(Box(username=username,
                             key=key).serialize())
+            return (domain, username)
 
         keyDeferred = self._keyDeriver.computeKey(password)
         keyDeferred.addCallback(_cbWriteIdentity)
         return keyDeferred
 
-    def key(self, domain, username):
-        domainpath = os.path.join(self.path, domain)
 
-        if os.path.exists(domainpath):
-            filepath = os.path.join(domainpath, username+".info")
-            if os.path.exists(filepath):
-                data = parseString(open(filepath).read())[0]
-                return data['key']
+    def key(self, domain, username):
+        userpath = self.path.child(domain).child(username + ".info")
+        if userpath.exists():
+            with userpath.open() as f:
+                data = parseString(f.read())[0]
+            return data['key']
+
+
 
 class DirectoryCertificateAndUserStore(q2q.DirectoryCertificateStore):
     def __init__(self, filepath):
