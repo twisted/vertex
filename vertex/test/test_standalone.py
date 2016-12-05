@@ -70,7 +70,7 @@ class AddUserAdminTests(TestCase):
 
 
 
-class UserStoreTestCase(SynchronousTestCase):
+class UserStoreTests(SynchronousTestCase):
     """
     Tests for L{_UserStore}
     """
@@ -121,6 +121,9 @@ class UserStoreTestCase(SynchronousTestCase):
         @param username: The username.
         @type username: L{str}
 
+        @param password: The password.
+        @type password: L{str}
+
         @param key: The key "derived" from C{password}
         @type key: L{str}
         """
@@ -131,6 +134,7 @@ class UserStoreTestCase(SynchronousTestCase):
         self.assertEqual(self.successResultOf(storedDeferred),
                          (domain, username))
 
+
     def test_storeAndRetrieveKey(self):
         """
         A key is derived for a password and stored under the domain
@@ -140,6 +144,7 @@ class UserStoreTestCase(SynchronousTestCase):
 
         self.assertStored(domain, username, password, key)
         self.assertEqual(self.users.key(domain, username), key)
+
 
     def test_missingKey(self):
         """

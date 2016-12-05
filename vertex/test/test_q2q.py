@@ -664,14 +664,15 @@ class ConnectionTestMixin:
         return d
 
 
-class DefaultCertificateStoreTestCase(unittest.SynchronousTestCase):
+
+class DefaultCertificateStoreTests(unittest.SynchronousTestCase):
     """
     Tests for L{q2q.DefaultCertificateStore}.
     """
 
     def setUp(self):
         self.store = q2q.DefaultCertificateStore()
-        self.username="username@domain"
+        self.username = "username@domain"
 
         self.checkPasswordReturns = defer.Deferred()
         self.credentials = _makeStubCredentials(
@@ -761,7 +762,7 @@ class TCPConnection(Q2QConnectionTestCase, ConnectionTestMixin):
 
 
 
-class UsernameShadowPasswordTestCase(unittest.SynchronousTestCase):
+class UsernameShadowPasswordTests(unittest.SynchronousTestCase):
     """
     Tests for L{q2q.UsernameShadowPassword}.
     """
@@ -810,7 +811,7 @@ class UsernameShadowPasswordTestCase(unittest.SynchronousTestCase):
 
 
 
-class InMemoryUserStoreTestCase(unittest.SynchronousTestCase):
+class InMemoryUserStoreTests(unittest.SynchronousTestCase):
     """
     Tests for L{q2q._InMemoryUserStore}
     """

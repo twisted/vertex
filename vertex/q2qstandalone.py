@@ -68,6 +68,24 @@ class _UserStore(object):
 
 
     def store(self, domain, username, password):
+        """
+        Store a key derived from this password, for this user, in this
+        domain.
+
+        @param domain: The domain for this user.
+        @type domain: L{str}
+
+        @param username: The name of this user.
+        @type username: L{str}
+
+        @param password: This user's password.
+        @type password: L{str}
+
+        @return: A L{defer.Deferred} that fires with the domain,
+            username pair if this user has never been seen before, and
+            L{NotAllowed} if it has.
+        @rtype: L{defer.Deferred}
+        """
         domainpath = self.path.child(domain)
         domainpath.makedirs(ignoreExistingDirectory=True)
         userpath = domainpath.child(username + ".info")
@@ -86,6 +104,19 @@ class _UserStore(object):
 
 
     def key(self, domain, username):
+        """
+        Retrieve the derived key for user with this name, in this
+        domain.
+
+        @param domain: This user's domain.
+        @type domain: L{str}
+
+        @param username: This user's name.
+        @type username: L{str}
+
+        @return: The user's key if they exist; otherwise L{None}.
+        @rtype: L{str} or L{None}
+        """
         userpath = self.path.child(domain).child(username + ".info")
         if userpath.exists():
             with userpath.open() as f:

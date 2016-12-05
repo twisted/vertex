@@ -52,7 +52,7 @@ from vertex.command import (
     )
 from vertex.conncache import ConnectionCache
 
-# extra
+# Extra
 import attr
 import txscrypt
 
@@ -114,8 +114,8 @@ class UsernameShadowPassword(object):
             L{self.password} matches the key and L{False} when not.
         @rtype: L{Deferred}
         """
-        # password is actually the derived key we stored, while
-        # self.password is the plain-text password.
+        # The password parameter is actually the derived key we
+        # stored, while self.password is the plain-text password.
         return self._keyDeriver.checkPassword(password, self.password)
 
 
@@ -1778,6 +1778,8 @@ class DefaultCertificateStore:
 
     def requestAvatarId(self, credentials):
         """
+        Return the ID associated with these credentials.
+
         @param credentials: something which implements one of the interfaces in
         self.credentialInterfaces.
 

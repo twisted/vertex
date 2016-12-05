@@ -29,6 +29,8 @@ class IQ2QUser(Interface):
         certificateRequest are valid.
         """
 
+
+
 class IQ2QUserStore(Interface):
     """
     A store of L{IQ2QUser} providers.

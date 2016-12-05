@@ -1,8 +1,9 @@
+# Copyright (c) Twisted Matrix Laboratories.
+# See LICENSE for details.
 """
 Verified fakes used across tests.
 """
 from pretend import stub, call, call_recorder
-from twisted.cred.credentials import UsernamePassword
 from twisted.internet import defer
 from twisted.trial import unittest
 import txscrypt
@@ -18,10 +19,14 @@ def _makeStubTxscrypt(computeKeyReturns, checkPasswordReturns):
     @param computeKeyReturns: What C{computeKey} should return.
 
     @param checkPasswordReturns: What C{checkPassword} should return.
+
+    @return: A L{stub} implementation of L{txscrypt}
+    @rtype: L{stub}
     """
 
     def computeKey(password):
         return computeKeyReturns
+
 
     def checkPassword(key, password):
         return checkPasswordReturns
@@ -42,6 +47,10 @@ def _makeStubCredentials(username, password, checkPasswordReturns):
     @type password: L{str}
 
     @param checkPasswordReturns: What C{checkPassword} should return.
+
+    @return: A L{stub} implementation of
+        L{twisted.python.cred.credentials.UsernamePassword}
+    @rtype: L{stub}
     """
 
     def checkPassword(password):
@@ -55,14 +64,20 @@ def _makeStubCredentials(username, password, checkPasswordReturns):
 
 def _makeStubIQ2QUserStore(storeReturns, keyReturns):
     """
-    Construct a stub L{IQ2QUserStore} implementer.
+    Construct a stub L{vertex.ivertex.IQ2QUserStore} implementer.
 
     @param storeReturns: What C{store} returns.
+
     @param keyReturns: What C{key} returns.
+
+    @return: A L{stub} implementation of
+        L{vertex.ivertex.IQ2QUserStore}
+    @rtype: L{stub}
     """
 
     def store(domain, username, password):
         return storeReturns
+
 
     def key(domain, username):
         return keyReturns
@@ -77,8 +92,10 @@ class VerifyStubTxscrypt(unittest.TestCase):
     same as L{txscrypt}.
     """
 
-
     def setUp(self):
+        """
+        Setup the test.
+        """
         self.computeKeyReturns = defer.Deferred()
         self.checkPasswordReturns = defer.Deferred()
 
