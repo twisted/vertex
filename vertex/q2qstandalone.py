@@ -6,7 +6,9 @@ import os
 
 from twisted.cred.portal import Portal
 
+from twisted.internet import defer
 from twisted.protocols.amp import AMP, Box, parseString
+from twisted.python.filepath import FilePath
 
 from vertex import q2q
 from vertex.ivertex import IQ2QUserStore

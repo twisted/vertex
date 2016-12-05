@@ -8,7 +8,6 @@ I{Quotient to Quotient} protocol implementation.
 # stdlib
 import itertools
 from hashlib import md5
-import operator
 import struct
 import datetime
 import time
@@ -78,20 +77,47 @@ class IgnoreConnectionFailed(protocol.ClientFactory):
         return self.realFactory.buildProtocol(addr)
 
 
+
 @implementer(IUsernamePassword)
 @attr.s
 class UsernameShadowPassword(object):
     """
     A L{IUsernamePassword} implementation that stores a key derived
     from a password and not the password itself.
+
+    @param username: The username for this user.
+    @type username: L{str}
+
+    @param password: The plain-text password for this user.
+    @type password: L{str}
+
+    @param keyDeriver: An object whose C{checkPassword} method
+        matches L{txscrypt.checkPassword}
+    @type keyDeriver: L{txscrypt}
     """
     username = attr.ib()
     password = attr.ib()
     _keyDeriver = attr.ib(default=txscrypt)
 
     def checkPassword(self, password):
-        # "password" is actually what we've stored
+        """
+        Check that the derived key matches these credentials'
+        password.
+
+        @param password: The derived key that should match our
+            plain-text password.  This is *not* the password itself.
+            It's named password so that instance provide
+            L{IUsernamePassword}.
+        @type password: L{str}
+
+        @return: A L{Deferred} that fires with L{True} when
+            L{self.password} matches the key and L{False} when not.
+        @rtype: L{Deferred}
+        """
+        # password is actually the derived key we stored, while
+        # self.password is the plain-text password.
         return self._keyDeriver.checkPassword(password, self.password)
+
 
 
 from twisted.internet import protocol
@@ -1673,23 +1699,69 @@ class DefaultQ2QAvatar:
         return newCert
 
 
-@implementer(ivertex.IQ2QUserStore)
-class _InMemoryUserStore(object):
 
-    def __init__(self, crypt=txscrypt):
-        self._crypt = crypt
-        self._keys = {}
+@implementer(ivertex.IQ2QUserStore)
+@attr.s
+class _InMemoryUserStore(object):
+    """
+    An in-memory implementation of L{IQ2QUserStore}.  It stores keys
+    derived from passwords for each username.
+
+    @param keyDeriver: An object whose C{computeKey} method
+        matches L{txscrypt.computeKey}
+    @type keyDeriver: L{txscrypt}
+
+    @ivar _keys: A mapping between domain, usernames pairs and their
+        derived keys.
+    @type _keys: L{dict}
+    """
+
+    _keyDeriver = attr.ib(default=txscrypt)
+    _keys = attr.ib(init=False, default=attr.Factory(dict))
+
 
     def store(self, domain, username, password):
-        cryptDeferred = self._crypt.computeKey(password)
-        def _cbStoreKey(key):
-            self._keys[(domain, username)] = key
+        """
+        Store a password for a user.
 
-        cryptDeferred.addCallback(_cbStoreKey)
-        return cryptDeferred
+        @param domain: The domain where this username is exists.
+        @type domain: L{str}
+
+        @param username: The user's name.
+        @type username: L{str}
+
+        @param password: The user's password.
+        @type password: L{str}
+
+        @return: A L{defer.Deferred} that fires when the key derived from
+            C{password} as been associated with this user and domain.
+        @rtype: L{defer.Deferred}
+        """
+        cryptDeferred = self._keyDeriver.computeKey(password)
+
+        def _cbStoreKey(key):
+            identity = (domain, username)
+            self._keys[identity] = key
+            return identity
+
+        return cryptDeferred.addCallback(_cbStoreKey)
+
 
     def key(self, domain, username):
+        """
+        Retrieve the key derived from a user's password.
+
+        @param domain: The domain where this username is exists.
+        @type domain: L{str}
+
+        @param username: The user's name.
+        @type username: L{str}
+
+        @return: The derived key for this user.
+        @rtype: L{str}
+        """
         return self._keys.get((domain, username))
+
 
 
 class DefaultCertificateStore:
@@ -1703,11 +1775,22 @@ class DefaultCertificateStore:
             "default certificate store only supports one interface")
         return interface, DefaultQ2QAvatar(*avatarId.split("@")), lambda : None
 
+
     def requestAvatarId(self, credentials):
+        """
+        @param credentials: something which implements one of the interfaces in
+        self.credentialInterfaces.
+
+        @return: a Deferred which will fire a string which identifies an
+        avatar, an empty tuple to specify an authenticated anonymous user
+        (provided as checkers.ANONYMOUS) or fire a Failure(UnauthorizedLogin).
+
+        @see: L{twisted.cred.credentials}
+        """
         username, domain = credentials.username.split("@")
         key = self.users.key(domain, username)
         if key is None:
-            raise UnauthorizedLogin()
+            return defer.fail(UnauthorizedLogin())
 
         def _cbPasswordChecked(passwordIsCorrect):
             if passwordIsCorrect:
@@ -1717,6 +1800,7 @@ class DefaultCertificateStore:
 
         return defer.maybeDeferred(credentials.checkPassword,
                                    key).addCallback(_cbPasswordChecked)
+
 
     def __init__(self):
         self.remoteStore = {}
