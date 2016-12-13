@@ -15,7 +15,7 @@ from collections import namedtuple
 
 from pprint import pformat
 
-from zope.interface import implements
+from zope.interface import implements, implementer
 
 # twisted
 from twisted.internet import reactor, defer, interfaces, protocol, error
@@ -51,6 +51,11 @@ from vertex.command import (
     Choke, Unchoke, WhoAmI
     )
 from vertex.conncache import ConnectionCache
+
+# Extra
+import attr
+import txscrypt
+
 from vertex.exceptions import (
     BadCertificateRequest, VerifyError, ConnectionError,
     AttemptsFailed, NoAttemptsMade
@@ -70,6 +75,52 @@ class IgnoreConnectionFailed(protocol.ClientFactory):
 
     def buildProtocol(self, addr):
         return self.realFactory.buildProtocol(addr)
+
+
+
+@implementer(IUsernamePassword)
+@attr.s
+class UsernameShadowPassword(object):
+    """
+    A L{IUsernamePassword} implementation that stores a key derived
+    from a password and not the password itself.
+
+    @param username: The username for this user.
+    @type username: L{str}
+
+    @param password: The plain-text password for this user.
+    @type password: L{str}
+
+    @param keyDeriver: An object whose C{checkPassword} method
+        matches L{txscrypt.checkPassword}
+    @type keyDeriver: L{txscrypt}
+    """
+    username = attr.ib()
+    password = attr.ib()
+    _keyDeriver = attr.ib(default=txscrypt)
+
+    def checkPassword(self, password):
+        """
+        Check that the derived key matches these credentials'
+        password.
+
+        @param password: The derived key that should match our
+            plain-text password.  This is *not* the password itself.
+            It's named password so that instance provide
+            L{IUsernamePassword}.
+        @type password: L{str}
+
+        @return: A L{Deferred} that fires with L{True} when
+            L{self.password} matches the key and L{False} when not.
+        @rtype: L{Deferred}
+        """
+        # The password parameter is actually the derived key we
+        # stored, while self.password is the plain-text password.
+        return self._keyDeriver.checkPassword(password, self.password)
+
+
+
+from twisted.internet import protocol
 
 class Q2QClientProtocolFactoryWrapper:
 
@@ -1082,8 +1133,7 @@ class Q2Q(AMP, subproducer.SuperProducer):
         ourCert = CS.getPrivateCertificate(domain)
 
         D = self.service.portal.login(
-            UsernamePassword(subj.commonName,
-                             password),
+            UsernameShadowPassword(subj.commonName, password),
             self,
             ivertex.IQ2QUser)
 
@@ -1650,6 +1700,70 @@ class DefaultQ2QAvatar:
 
 
 
+@implementer(ivertex.IQ2QUserStore)
+@attr.s
+class _InMemoryUserStore(object):
+    """
+    An in-memory implementation of L{IQ2QUserStore}.  It stores keys
+    derived from passwords for each username.
+
+    @param keyDeriver: An object whose C{computeKey} method
+        matches L{txscrypt.computeKey}
+    @type keyDeriver: L{txscrypt}
+
+    @ivar _keys: A mapping between domain, usernames pairs and their
+        derived keys.
+    @type _keys: L{dict}
+    """
+
+    _keyDeriver = attr.ib(default=txscrypt)
+    _keys = attr.ib(init=False, default=attr.Factory(dict))
+
+
+    def store(self, domain, username, password):
+        """
+        Store a password for a user.
+
+        @param domain: The domain where this username is exists.
+        @type domain: L{str}
+
+        @param username: The user's name.
+        @type username: L{str}
+
+        @param password: The user's password.
+        @type password: L{str}
+
+        @return: A L{defer.Deferred} that fires when the key derived from
+            C{password} as been associated with this user and domain.
+        @rtype: L{defer.Deferred}
+        """
+        cryptDeferred = self._keyDeriver.computeKey(password)
+
+        def _cbStoreKey(key):
+            identity = (domain, username)
+            self._keys[identity] = key
+            return identity
+
+        return cryptDeferred.addCallback(_cbStoreKey)
+
+
+    def key(self, domain, username):
+        """
+        Retrieve the key derived from a user's password.
+
+        @param domain: The domain where this username is exists.
+        @type domain: L{str}
+
+        @param username: The user's name.
+        @type username: L{str}
+
+        @return: The derived key for this user.
+        @rtype: L{str}
+        """
+        return self._keys.get((domain, username))
+
+
+
 class DefaultCertificateStore:
 
     implements(ICredentialsChecker, IRealm)
@@ -1661,34 +1775,45 @@ class DefaultCertificateStore:
             "default certificate store only supports one interface")
         return interface, DefaultQ2QAvatar(*avatarId.split("@")), lambda : None
 
+
     def requestAvatarId(self, credentials):
+        """
+        Return the ID associated with these credentials.
+
+        @param credentials: something which implements one of the interfaces in
+        self.credentialInterfaces.
+
+        @return: a Deferred which will fire a string which identifies an
+        avatar, an empty tuple to specify an authenticated anonymous user
+        (provided as checkers.ANONYMOUS) or fire a Failure(UnauthorizedLogin).
+
+        @see: L{twisted.cred.credentials}
+        """
         username, domain = credentials.username.split("@")
-        pw = self.users.get((domain, username))
-        if pw is None:
+        key = self.users.key(domain, username)
+        if key is None:
             return defer.fail(UnauthorizedLogin())
-        def _(passwordIsCorrect):
+
+        def _cbPasswordChecked(passwordIsCorrect):
             if passwordIsCorrect:
                 return username + '@' + domain
             else:
                 raise UnauthorizedLogin()
-        return defer.maybeDeferred(
-            credentials.checkPassword, pw).addCallback(_)
+
+        return defer.maybeDeferred(credentials.checkPassword,
+                                   key).addCallback(_cbPasswordChecked)
+
 
     def __init__(self):
         self.remoteStore = {}
         self.localStore = {}
-        self.users = {}
+        self.users = _InMemoryUserStore()
 
     def getSelfSignedCertificate(self, domainName):
         return defer.maybeDeferred(self.remoteStore.__getitem__, domainName)
 
     def addUser(self, domain, username, privateSecret):
-        self.users[domain, username] = privateSecret
-
-    def checkUser(self, domain, username, privateSecret):
-        if self.users.get((domain, username)) != privateSecret:
-            return defer.fail(KeyError())
-        return defer.succeed(True)
+        return self.users.store(domain, username, privateSecret)
 
     def storeSelfSignedCertificate(self, domainName, mainCert):
         """
@@ -2124,12 +2249,8 @@ class Q2QService(service.MultiService, protocol.ServerFactory):
             cert = signResponse['certificate']
             privcert = certpair(cert, kp)
             apc(str(fromAddress), privcert)
-        gettingSecureConnection.addCallback(gotSignResponse)
-
-        return self.getSecureConnection(
-            fromAddress, fromAddress.domainAddress(), authorize=False,
-            usePrivateCertificate=fakecert,
-        ).addCallback(gotSecureConnection)
+            return signResponse
+        return gettingSecureConnection.addCallback(gotSignResponse)
 
 
     def authorize(self, fromAddress, password):
@@ -2451,4 +2572,3 @@ class Q2QService(service.MultiService, protocol.ServerFactory):
                 extraHash=(cacheFrom, toDomain, authorize)
                 )
         return resolveme.addCallback(cb)
-

@@ -29,6 +29,46 @@ class IQ2QUser(Interface):
         certificateRequest are valid.
         """
 
+
+
+class IQ2QUserStore(Interface):
+    """
+    A store of L{IQ2QUser} providers.
+    """
+
+    def store(domain, username, password):
+        """
+        Store a password for a user.
+
+        @param domain: The domain where this username is exists.
+        @type domain: L{str}
+
+        @param username: The user's name.
+        @type username: L{str}
+
+        @param password: The user's password.
+        @type password: L{str}
+
+        @return: A L{defer.Deferred} that fires when the key derived from
+            C{password} as been associated with this user and domain.
+        @rtype: L{defer.Deferred}
+        """
+
+    def key(domain, username):
+        """
+        Retrieve the key derived from a user's password.
+
+        @param domain: The domain where this username is exists.
+        @type domain: L{str}
+
+        @param username: The user's name.
+        @type username: L{str}
+
+        @return: The derived key for this user.
+        @rtype: L{str}
+        """
+
+
 class IFileTransfer(Interface):
 
     def getUploadSink(self, path):

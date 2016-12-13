@@ -6,11 +6,19 @@ import os
 
 from twisted.cred.portal import Portal
 
+from twisted.internet import defer
 from twisted.protocols.amp import AMP, Box, parseString
+from twisted.python.filepath import FilePath
 
 from vertex import q2q
+from vertex.ivertex import IQ2QUserStore
 from vertex.depserv import DependencyService, Conf
 from vertex.q2qadmin import AddUser, NotAllowed
+
+import attr
+import txscrypt
+
+from zope.interface import implementer
 
 
 class IdentityAdmin(AMP):
@@ -19,8 +27,9 @@ class IdentityAdmin(AMP):
     def command_ADD_USER(self, name, password):
         # all security is transport security
         theDomain = self.transport.getQ2QHost().domain
-        self.factory.store.addUser(theDomain, name, password)
-        return {}
+        userDeferred = self.factory.store.addUser(theDomain, name, password)
+        userDeferred.addCallback(lambda _: {})
+        return userDeferred
 
 
 class IdentityAdminFactory:
@@ -37,34 +46,89 @@ class IdentityAdminFactory:
             return [(self, "identity admin")]
         return []
 
-class _usermap:
-    def __init__(self, path):
-        self.path = path
 
-    def __setitem__(self, (domain, username), password):
-        domainpath = os.path.join(self.path, domain)
-        if not os.path.exists(domainpath):
-            os.makedirs(domainpath)
-        userpath = os.path.join(domainpath, username+".info")
-        if os.path.exists(userpath):
-            raise NotAllowed()
-        f = open(userpath, 'w')
-        f.write(Box(username=username,
-                    password=password.encode('hex')).serialize())
-        f.close()
 
-    def get(self, (domain, username)):
-        domainpath = os.path.join(self.path, domain)
-        if os.path.exists(domainpath):
-            filepath = os.path.join(domainpath, username+".info")
-            if os.path.exists(filepath):
-                data = parseString(open(filepath).read())[0]
-                return data['password'].decode('hex')
+@implementer(IQ2QUserStore)
+@attr.s
+class _UserStore(object):
+    """
+    A L{IQ2QUserStore} implementation that stores usernames, domains,
+    and keys derived from passwords in files.
+
+    @param path: Where to write user information.
+    @type path: L{str}
+
+    @param keyDeriver: An object whose C{computeKey} method
+        matches L{txscrypt.computeKey}
+    @type keyDeriver: L{txscrypt}
+    """
+
+    path = attr.ib(convert=FilePath)
+    _keyDeriver = attr.ib(default=txscrypt)
+
+
+    def store(self, domain, username, password):
+        """
+        Store a key derived from this password, for this user, in this
+        domain.
+
+        @param domain: The domain for this user.
+        @type domain: L{str}
+
+        @param username: The name of this user.
+        @type username: L{str}
+
+        @param password: This user's password.
+        @type password: L{str}
+
+        @return: A L{defer.Deferred} that fires with the domain,
+            username pair if this user has never been seen before, and
+            L{NotAllowed} if it has.
+        @rtype: L{defer.Deferred}
+        """
+        domainpath = self.path.child(domain)
+        domainpath.makedirs(ignoreExistingDirectory=True)
+        userpath = domainpath.child(username + ".info")
+        if userpath.exists():
+            return defer.fail(NotAllowed())
+
+        def _cbWriteIdentity(key):
+            with userpath.open('w') as f:
+                f.write(Box(username=username,
+                            key=key).serialize())
+            return (domain, username)
+
+        keyDeferred = self._keyDeriver.computeKey(password)
+        keyDeferred.addCallback(_cbWriteIdentity)
+        return keyDeferred
+
+
+    def key(self, domain, username):
+        """
+        Retrieve the derived key for user with this name, in this
+        domain.
+
+        @param domain: This user's domain.
+        @type domain: L{str}
+
+        @param username: This user's name.
+        @type username: L{str}
+
+        @return: The user's key if they exist; otherwise L{None}.
+        @rtype: L{str} or L{None}
+        """
+        userpath = self.path.child(domain).child(username + ".info")
+        if userpath.exists():
+            with userpath.open() as f:
+                data = parseString(f.read())[0]
+            return data['key']
+
+
 
 class DirectoryCertificateAndUserStore(q2q.DirectoryCertificateStore):
     def __init__(self, filepath):
         q2q.DirectoryCertificateStore.__init__(self, filepath)
-        self.users = _usermap(os.path.join(filepath, "users"))
+        self.users = _UserStore(os.path.join(filepath, "users"))
 
     def getPrivateCertificate(self, domain):
         try:

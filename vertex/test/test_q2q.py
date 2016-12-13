@@ -4,11 +4,13 @@
 """
 Tests for L{vertex.q2q}.
 """
+from pretend import call
 
 from cStringIO import StringIO
 
 from twisted.trial import unittest
 from twisted.application import service
+from twisted.cred.error import UnauthorizedLogin
 from twisted.internet import reactor, protocol, defer
 from twisted.internet.task import deferLater
 from twisted.internet.ssl import DistinguishedName, PrivateCertificate, KeyPair
@@ -19,11 +21,19 @@ from twisted.internet.error import ConnectionDone
 # from twisted.internet.main import CONNECTION_DONE
 
 from zope.interface import implements
+from zope.interface.verify import verifyObject
 from twisted.internet.interfaces import IResolverSimple
 
 from twisted.protocols.amp import UnknownRemoteError, QuitBox, Command, AMP
 
+import txscrypt
+
+from ._fakes import (_makeStubTxscrypt,
+                     _makeStubCredentials,
+                     _makeStubIQ2QUserStore)
+
 from vertex import q2q
+from vertex import ivertex
 
 
 def noResources(*a):
@@ -411,13 +421,18 @@ class ConnectionTestMixin:
                           privateSecret, serverService,
                           serverDomain):
         svc = self._makeQ2QService(username + '@' + serverDomain, None)
-        serverService.certificateStorage.addUser(serverDomain,
-                                                 username,
-                                                 privateSecret)
         svc.setServiceParent(self.msvc)
-        return svc.authorize(q2q.Q2QAddress(serverDomain, username),
-                             privateSecret).addCallback(lambda x: svc)
 
+        added = serverService.certificateStorage.addUser(serverDomain,
+                                                         username,
+                                                         privateSecret)
+
+        def _cbAuthorize(_):
+            return svc.authorize(q2q.Q2QAddress(serverDomain, username),
+                                 privateSecret).addCallback(lambda x: svc)
+
+        added.addCallback(_cbAuthorize)
+        return added
 
     def testListening(self):
         _1 = self.addClientService(self.toAddress, 'aaaa', self.serverService)
@@ -650,6 +665,75 @@ class ConnectionTestMixin:
 
 
 
+class DefaultCertificateStoreTests(unittest.SynchronousTestCase):
+    """
+    Tests for L{q2q.DefaultCertificateStore}.
+    """
+
+    def setUp(self):
+        self.store = q2q.DefaultCertificateStore()
+        self.username = "username@domain"
+
+        self.checkPasswordReturns = defer.Deferred()
+        self.credentials = _makeStubCredentials(
+            username=self.username,
+            password="password",
+            checkPasswordReturns=self.checkPasswordReturns,
+        )
+
+
+    def test_requestAvatarIdUnknownUser(self):
+        """
+        A L{Deferred} failed with L{UnauthorizedLogin} is returned
+        when an unknown user is requested.
+        """
+        self.store.users = _makeStubIQ2QUserStore(
+            keyReturns=None,
+            storeReturns=defer.Deferred(),
+        )
+
+        failure = self.failureResultOf(
+            self.store.requestAvatarId(self.credentials),
+        )
+        self.assertIsInstance(failure.value, UnauthorizedLogin)
+
+
+    def test_requestAvatarIdWrongPassword(self):
+        """
+        A L{Deferred} that fires with with L{UnauthorizedLogin} is returned
+        when the wrong password is provided.
+        """
+        self.store.users = _makeStubIQ2QUserStore(
+            keyReturns="key",
+            storeReturns=defer.Deferred(),
+        )
+
+        wrongPasswordDeferred = self.store.requestAvatarId(self.credentials)
+
+        self.assertNoResult(wrongPasswordDeferred)
+        self.checkPasswordReturns.callback(False)
+        failure = self.failureResultOf(wrongPasswordDeferred)
+        self.assertIsInstance(failure.value, UnauthorizedLogin)
+
+
+    def test_requestAvatarId(self):
+        """
+        A L{Deferred} that fires with with the username is returned
+        when the the right password is provided.
+        """
+        self.store.users = _makeStubIQ2QUserStore(
+            keyReturns="key",
+            storeReturns=defer.Deferred(),
+        )
+
+        wrongPasswordDeferred = self.store.requestAvatarId(self.credentials)
+
+        self.assertNoResult(wrongPasswordDeferred)
+        self.checkPasswordReturns.callback(True)
+        self.assertEqual(self.successResultOf(wrongPasswordDeferred),
+                         self.username)
+
+
 
 class VirtualConnection(Q2QConnectionTestCase, ConnectionTestMixin):
     inboundTCPPortnum = None
@@ -675,6 +759,108 @@ class TCPConnection(Q2QConnectionTestCase, ConnectionTestMixin):
     inboundTCPPortnum = 0
     udpEnabled = False
     virtualEnabled = False
+
+
+
+class UsernameShadowPasswordTests(unittest.SynchronousTestCase):
+    """
+    Tests for L{q2q.UsernameShadowPassword}.
+    """
+
+    def setUp(self):
+        self.username = "username"
+        self.password = "password"
+
+        self.checkPasswordReturns = defer.Deferred()
+
+        self.fakeTxscrypt = _makeStubTxscrypt(
+            computeKeyReturns=defer.Deferred(),
+            checkPasswordReturns=self.checkPasswordReturns,
+        )
+
+        self.credentials = q2q.UsernameShadowPassword(
+            username=self.username,
+            password=self.password,
+            keyDeriver=self.fakeTxscrypt,
+        )
+
+
+    def test_checkPassword(self):
+        """
+        The provided key is checked against the credentials'
+        plain-text password, and the result returned
+        """
+        key = "key"
+        result = self.credentials.checkPassword(key)
+        self.assertEqual(
+            self.fakeTxscrypt.checkPassword.calls,
+            [call(key, self.password)],
+        )
+        self.assertIs(result, self.checkPasswordReturns)
+
+
+    def test_txscryptIsdefaultKeyDeriver(self):
+        """
+        L{txscrypt} is the default key deriver.
+        """
+        credentials = q2q.UsernameShadowPassword(
+            username=self.username,
+            password=self.password,
+        )
+        self.assertIs(credentials._keyDeriver, txscrypt)
+
+
+
+class InMemoryUserStoreTests(unittest.SynchronousTestCase):
+    """
+    Tests for L{q2q._InMemoryUserStore}
+    """
+
+    def setUp(self):
+        self.computeKeyReturns = defer.Deferred()
+
+        self.fakeTxscrypt = _makeStubTxscrypt(
+            computeKeyReturns=self.computeKeyReturns,
+            checkPasswordReturns=defer.Deferred(),
+        )
+
+        self.users = q2q._InMemoryUserStore(
+            keyDeriver=self.fakeTxscrypt,
+        )
+
+
+    def test_providesIQ2QUserStore(self):
+        """
+        The store provides L{ivertex.IQ2QUserStore}
+        """
+        verifyObject(ivertex.IQ2QUserStore, self.users)
+
+
+    def test_storeAndRetrieveKey(self):
+        """
+        A key is derived for a password and stored under the domain
+        and user.
+        """
+        domain, username, password, key = "domain", "user", "password", "key"
+
+        storedDeferred = self.users.store(domain, username, password)
+
+        self.assertNoResult(storedDeferred)
+        self.computeKeyReturns.callback(key)
+        self.assertEqual(self.successResultOf(storedDeferred),
+                         (domain, username))
+
+        self.assertEqual(self.users.key(domain, username), key)
+
+
+    def test_missingKey(self):
+        """
+        The derived key for an unknown domain and user combination is
+        L{None}.
+        """
+        self.assertIsNone(self.users.key("mystery domain", "mystery user"))
+
+
 
 # class LiveServerMixin:
 #     serverDomain = 'test.domain.example.com'
