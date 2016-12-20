@@ -193,6 +193,27 @@ class Sign(Command):
 
 
 
+class Write(Command):
+    """
+    Write the given bytes to a multiplexed virtual connection.
+    """
+    commandName = 'write'
+    arguments = [('id', Integer()),
+                 ('body', String())]
+    requiresAnswer = False
+
+
+
+class Close(Command):
+    """
+    Close the given multiplexed virtual connetion.
+    """
+    commandName = 'close'
+    arguments = [('id', Integer())]
+    requiresAnswer = True
+
+
+
 class Choke(Command):
     """
     Flow control: ask the peer to stop sending data over this virtual channel.

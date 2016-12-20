@@ -48,7 +48,7 @@ from vertex.amputil import (
     )
 from vertex.command import (
     Sign, Listen, Virtual, Identify, BindUDP, SourceIP,
-    Choke, Unchoke, WhoAmI
+    Write, Close, Choke, Unchoke, WhoAmI
     )
 from vertex.conncache import ConnectionCache
 
@@ -1058,7 +1058,8 @@ class Q2Q(AMP, subproducer.SuperProducer):
         return {}
 
 
-    def amp_WRITE(self, box):
+    @Write.responder
+    def _write(self, body, id):
         """
         Respond to a WRITE command, sending some data over a virtual channel
         created by VIRTUAL.  The answer is simply an acknowledgement, as it is
@@ -1078,15 +1079,15 @@ class Q2Q(AMP, subproducer.SuperProducer):
             S:
 
         """
-        id = int(box['id'])
         if id not in self.connections:
             raise error.ConnectionDone()
         connection = self.connections[id]
-        data = box['body']
-        connection.dataReceived(data)
-        return AmpBox()
+        connection.dataReceived(body)
+        return {}
 
-    def amp_CLOSE(self, box):
+
+    @Close.responder
+    def _close(self, id):
         """
         Respond to a CLOSE command, dumping some data onto the stream.  As with
         WRITE, this returns an empty acknowledgement.
@@ -1103,9 +1104,9 @@ class Q2Q(AMP, subproducer.SuperProducer):
 
         """
         # The connection is removed from the mapping by connectionLost.
-        connection = self.connections[int(box['id'])]
+        connection = self.connections[id]
         connection.connectionLost(Failure(CONNECTION_DONE))
-        return AmpBox()
+        return {}
 
 
     @Sign.responder
@@ -1620,7 +1621,7 @@ class VirtualTransport(subproducer.SubProducer):
             # print 'omg wtf loseConnection!???!'
             return
         self.disconnecting = True
-        d = self.q2q.callRemoteString('close', id=str(self.id))
+        d = self.q2q.callRemote(Close, id=self.id)
         def cbClosed(ignored):
             self.connectionLost(Failure(CONNECTION_DONE))
         def ebClosed(reason):
@@ -1659,8 +1660,7 @@ class VirtualTransport(subproducer.SubProducer):
             self.connectionLost(reason)
 
     def write(self, data):
-        self.q2q.callRemoteString(
-            'write', False, body=data, id=str(self.id))
+        self.q2q.callRemote(Write, body=data, id=self.id)
 
     def getHost(self):
         return VirtualTransportAddress(self.q2q.transport.getHost())
