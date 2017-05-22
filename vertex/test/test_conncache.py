@@ -13,7 +13,7 @@ from twisted.test.proto_helpers import StringTransport
 from vertex import conncache
 
 
-class FakeEndpoint(object):
+class FakeEndpointTests(object):
     """
     Fake vertex endpoint for tesing.
 
@@ -43,7 +43,7 @@ class DisconnectingTransport(StringTransport):
 
 
 
-class TestConnectionCache(TestCase):
+class TestConnectionCacheTests(TestCase):
     """
     Tests for L{conncache.ConnectionCache}.
 
@@ -57,7 +57,7 @@ class TestConnectionCache(TestCase):
         against.
         """
         self.cache = conncache.ConnectionCache()
-        self.endpoint = FakeEndpoint()
+        self.endpoint = FakeEndpointTests()
         self.protocol = Protocol()
 
 

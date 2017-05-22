@@ -1,5 +1,5 @@
-# Copyright 2013 Twisted Matrix Laboratories.  See LICENSE file for details
-
+# Copyright (c) Twisted Matrix Laboratories.
+# See LICENSE for details.
 """
 Tests for L{vertex.q2qstandalone}
 """
@@ -34,12 +34,14 @@ class AddUserAdminTests(TestCase):
         store = stub(addUser=self.addUser)
         self.adminFactory = stub(store=store)
 
+
     def test_IdentityAdmin_responder_adds_user(self):
         """
         L{IdentityAdmin} has a L{AddUser} responder.
         """
         responder = IdentityAdmin().locateResponder(AddUser.commandName)
         self.assertIsNotNone(responder)
+
 
     def test_adds_user(self):
         """
@@ -60,12 +62,12 @@ class AddUserAdminTests(TestCase):
                               password='q2q password')
         pump.flush()
 
-        # the username and password are added, along with the domain=q2q
+        # The username and password are added, along with the domain=q2q
         # host, to the IdentityAdmin's factory's store
         self.assertEqual([call('Q2Q Host', 'q2q username', 'q2q password')],
                          self.addUser.calls)
 
-        # the server responds with {}
+        # The server responds with {}
         self.assertEqual({}, self.successResultOf(d))
 
 

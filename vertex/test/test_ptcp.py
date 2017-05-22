@@ -1,3 +1,5 @@
+# Copyright (c) Twisted Matrix Laboratories.
+# See LICENSE for details.
 # -*- test-case-name: vertex.test.test_ptcp -*-
 from __future__ import print_function
 
@@ -16,10 +18,13 @@ def reallyLossy(method):
             method(*a, **kw)
     return worseMethod
 
+
+
 def insufficientTransmitter(method,  mtu):
     def worseMethod(bytes, addr):
         method(bytes[:mtu], addr)
     return worseMethod
+
 
 
 class TestProtocol(protocol.Protocol):
@@ -30,11 +35,14 @@ class TestProtocol(protocol.Protocol):
         self._waiting = None
         self.buffer = []
 
+
     def connectionMade(self):
         self.onConnect.callback(None)
 
+
     def connectionLost(self, reason):
         self.onDisconn.callback(None)
+
 
     def gotBytes(self, bytes):
         assert self._waiting is None
@@ -42,6 +50,7 @@ class TestProtocol(protocol.Protocol):
             return defer.succeed(None)
         self._waiting = (defer.Deferred(), bytes)
         return self._waiting[0]
+
 
     def dataReceived(self, bytes):
         self.buffer.append(bytes)
@@ -55,17 +64,23 @@ class TestProtocol(protocol.Protocol):
                 self._waiting[0].callback(None)
                 self._waiting = None
 
+
+
 class Django(protocol.ClientFactory):
     def __init__(self):
         self.onConnect = defer.Deferred()
+
 
     def buildProtocol(self, addr):
         p = protocol.ClientFactory.buildProtocol(self, addr)
         self.onConnect.callback(p)
         return p
 
+
     def clientConnectionFailed(self, conn, err):
         self.onConnect.errback(err)
+
+
 
 class ConnectedPTCPMixin:
     serverPort = None
@@ -74,7 +89,6 @@ class ConnectedPTCPMixin:
                       ServerProtocol=TestProtocol, ClientProtocol=TestProtocol):
         serverProto = ServerProtocol()
         clientProto = ClientProtocol()
-
 
         self.serverProto = serverProto
         self.clientProto = clientProto
@@ -104,6 +118,7 @@ class ConnectedPTCPMixin:
             serverPort, clientPort
             )
 
+
     def tearDown(self):
         td = []
 
@@ -111,6 +126,7 @@ class ConnectedPTCPMixin:
             td.append(ptcpTransport.waitForAllConnectionsToClose())
         d = defer.DeferredList(td)
         return d
+
 
 
 class TestProducerProtocol(protocol.Protocol):
@@ -121,15 +137,18 @@ class TestProducerProtocol(protocol.Protocol):
         self.onConnect = defer.Deferred()
         self.onPaused = defer.Deferred()
 
+
     def connectionMade(self):
         self.onConnect.callback(None)
         self.count = -1
         self.transport.registerProducer(self, False)
 
+
     def pauseProducing(self):
         if self.onPaused is not None:
             self.onPaused.callback(None)
             self.onPaused = None
+
 
     def resumeProducing(self):
         self.count += 1
@@ -144,7 +163,9 @@ class TestProducerProtocol(protocol.Protocol):
         else:
             self.transport.unregisterProducer()
 
-class PTCPTransportTestCase(ConnectedPTCPMixin, unittest.TestCase):
+
+
+class PTCPTransportTests(ConnectedPTCPMixin, unittest.TestCase):
     def setUp(self):
         """
         I have no idea why one of these values is divided by 10 and the
@@ -179,14 +200,12 @@ class PTCPTransportTestCase(ConnectedPTCPMixin, unittest.TestCase):
 
         return defer.DeferredList([serverProto.onConnect, clientProto.onConnect]).addCallback(connectionsMade)
 
-    #testWhoAmI.skip = 'arglebargle'
 
-    def testVerySimpleConnection(self):
+    def test_VerySimpleConnection(self):
         (serverProto, clientProto,
          sf, cf,
          serverTransport, clientTransport,
          serverPort, clientPort) = self.setUpForATest()
-
 
         clientTransport.connect(cf, '127.0.0.1', serverPort.getHost().port)
 
@@ -219,7 +238,7 @@ class PTCPTransportTestCase(ConnectedPTCPMixin, unittest.TestCase):
         return dl
 
 
-    def testProducerConsumer(self):
+    def test_ProducerConsumer(self):
         (serverProto, clientProto,
          sf, cf,
          serverTransport, clientTransport,
@@ -236,7 +255,7 @@ class PTCPTransportTestCase(ConnectedPTCPMixin, unittest.TestCase):
         return clientProto.onDisconn.addCallback(disconnected)
 
 
-    def testTransportProducer(self):
+    def test_TransportProducer(self):
         (serverProto, clientProto,
          sf, cf,
          serverTransport, clientTransport,
@@ -258,13 +277,13 @@ class PTCPTransportTestCase(ConnectedPTCPMixin, unittest.TestCase):
             reactor.callLater(2, resumeProducing)
             return clientProto.gotBytes(BYTES).addCallback(cbBytes)
 
-
         clientTransport.connect(cf, '127.0.0.1', serverPort.getHost().port)
         connD = defer.DeferredList([clientProto.onConnect, serverProto.onConnect])
         connD.addCallback(cbConnect)
         return connD
 
-    def testTransportProducerProtocolProducer(self):
+
+    def test_TransportProducerProtocolProducer(self):
         (serverProto, clientProto,
          sf, cf,
          serverTransport, clientTransport,
@@ -303,12 +322,14 @@ class PTCPTransportTestCase(ConnectedPTCPMixin, unittest.TestCase):
         return connD
 
 
+
 class LossyTransportTestCase(PTCPTransportTestCase):
     def setUpForATest(self, *a, **kw):
         results = PTCPTransportTestCase.setUpForATest(self, *a, **kw)
         results[-2].write = reallyLossy(results[-2].write)
         results[-1].write = reallyLossy(results[-1].write)
         return results
+
 
 
 class SmallMTUTransportTestCase(PTCPTransportTestCase):
@@ -320,7 +341,7 @@ class SmallMTUTransportTestCase(PTCPTransportTestCase):
 
 
 
-class TimeoutTestCase(ConnectedPTCPMixin, unittest.TestCase):
+class TimeoutTests(ConnectedPTCPMixin, unittest.TestCase):
     def setUp(self):
         """
         Shorten the retransmit timeout so that tests finish more quickly.
@@ -330,7 +351,7 @@ class TimeoutTestCase(ConnectedPTCPMixin, unittest.TestCase):
             ptcp.PTCPConnection._retransmitTimeout / 10)
 
 
-    def testConnectTimeout(self):
+    def test_ConnectTimeout(self):
         (serverProto, clientProto,
          sf, cf,
          serverTransport, clientTransport,
@@ -338,9 +359,12 @@ class TimeoutTestCase(ConnectedPTCPMixin, unittest.TestCase):
 
         clientTransport.sendPacket = lambda *a, **kw: None
         clientTransport.connect(cf, '127.0.0.1', serverPort.getHost().port)
-        return cf.onConnect.addBoth(lambda result: result.trap(error.TimeoutError) and None)
+        return cf.onConnect.addBoth(
+            lambda result: result.trap(error.TimeoutError) and None
+        )
 
-    def testDataTimeout(self):
+
+    def test_DataTimeout(self):
         (serverProto, clientProto,
          sf, cf,
          serverTransport, clientTransport,
@@ -349,12 +373,9 @@ class TimeoutTestCase(ConnectedPTCPMixin, unittest.TestCase):
         def cbConnected(ignored):
             serverProto.transport.ptcp.sendPacket = lambda *a, **kw: None
             clientProto.transport.write('Receive this data.')
-            serverProto.transport.write('Send this data.') # have to send data
-                                                           # or the server will
-                                                           # never time out:
-                                                           # need a
-                                                           # SO_KEEPALIVE
-                                                           # option somewhere
+            serverProto.transport.write('Send this data.')
+            # Have to send data or the server will never time out:
+            # need a SO_KEEPALIVE option somewhere
             return clientProto.onDisconn
 
         clientTransport.connect(cf, '127.0.0.1', serverPort.getHost().port)

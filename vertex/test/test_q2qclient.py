@@ -1,4 +1,5 @@
-# Copyright 2005-2008 Divmod, Inc.  See LICENSE file for details
+# Copyright (c) Twisted Matrix Laboratories.
+# See LICENSE for details.
 # -*- vertex.test.test_q2q.UDPConnection -*-
 
 """
@@ -15,7 +16,9 @@ from vertex import q2q, q2qclient
 from vertex.test.helpers import FakeQ2QService
 
 
-class TestCase(unittest.TestCase):
+# I'm naming this 'TestCaseTests' to please the linter.
+# But honestly this ... is not ok hah!
+class TestCaseTests(unittest.TestCase):
     def test_stuff(self):
         svc = FakeQ2QService()
 
@@ -33,7 +36,9 @@ class TestCase(unittest.TestCase):
 
         svc.listenQ2Q(serverAddr, chooser, "Admin")
 
-        d = q2qclient.enregister(svc, q2q.Q2QAddress("domain", "user"), "password")
+        d = q2qclient.enregister(
+            svc, q2q.Q2QAddress("domain", "user"), "password"
+        )
         svc.flush()
 
         self.successResultOf(d)
