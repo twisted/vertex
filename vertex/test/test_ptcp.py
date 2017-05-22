@@ -323,18 +323,18 @@ class PTCPTransportTests(ConnectedPTCPMixin, unittest.TestCase):
 
 
 
-class LossyTransportTestCase(PTCPTransportTestCase):
+class LossyTransportTestCase(PTCPTransportTests):
     def setUpForATest(self, *a, **kw):
-        results = PTCPTransportTestCase.setUpForATest(self, *a, **kw)
+        results = PTCPTransportTests.setUpForATest(self, *a, **kw)
         results[-2].write = reallyLossy(results[-2].write)
         results[-1].write = reallyLossy(results[-1].write)
         return results
 
 
 
-class SmallMTUTransportTestCase(PTCPTransportTestCase):
+class SmallMTUTransportTestCase(PTCPTransportTests):
     def setUpForATest(self, *a, **kw):
-        results = PTCPTransportTestCase.setUpForATest(self, *a, **kw)
+        results = PTCPTransportTests.setUpForATest(self, *a, **kw)
         results[-2].write = insufficientTransmitter(results[-2].write, 128)
         results[-1].write = insufficientTransmitter(results[-1].write, 128)
         return results

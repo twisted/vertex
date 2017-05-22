@@ -652,7 +652,7 @@ class ConnectionTestMixin:
                 ).addCallback(assertSomeStuff)
             return deferLater(reactor, 3, lambda: None).addCallback(keepGoing)
         return defer.DeferredList([a, b]).addCallback(dotest)
-    testSendingFiles.skip = "hangs forever"
+    test_SendingFiles.skip = "hangs forever"
 
 
     def test_BadIssuerOnSelfSignedCert(self):

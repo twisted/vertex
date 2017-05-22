@@ -34,6 +34,7 @@ def makeCert(cn):
     return key.newCertificate(sscrd)
 
 
+
 def makeCertRequest(cn):
     """
     Create a certificate request with the given common name.
