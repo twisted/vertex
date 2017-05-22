@@ -593,7 +593,7 @@ class ConnectionTestMixin:
                     return _3.addCallback(_3c)
                 return _2.addCallback(_2c)
             return _1.addCallback(_1c)
-        return self.testListening().addCallback(actualTest)
+        return self.test_Listening().addCallback(actualTest)
 
 
     def test_TwoGreetings(self):
@@ -656,7 +656,7 @@ class ConnectionTestMixin:
 
 
     def test_BadIssuerOnSelfSignedCert(self):
-        x = self.testConnectWithIntroduction()
+        x = self.test_ConnectWithIntroduction()
         def actualTest(result):
             ponged = defer.Deferred()
             signer = self.serverService2.certificateStorage.getPrivateCertificate(
@@ -841,7 +841,7 @@ class VirtualConnectionTests(Q2QConnectionTestCase, ConnectionTestMixin):
         pass
 
     test_Listening.skip = 'virtual port forwarding not implemented'
-    test_ChooserGetsThreeChoices.skip = 'cant do this without testListening'
+    test_ChooserGetsThreeChoices.skip = 'cant do this without test_Listening'
 
 
 
