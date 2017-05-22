@@ -1,5 +1,5 @@
-# Copyright 2005 Divmod, Inc.  See LICENSE file for details
-
+# Copyright (c) Twisted Matrix Laboratories.
+# See LICENSE for details.
 """
 This module is no longer supported for use outside Vertex.
 """
@@ -12,7 +12,8 @@ from twisted.application import service, internet
 from zope.interface import implements
 
 class Conf(dict):
-    """A class to help in construction the configuration for delpoy().
+    """
+    A class to help in construction the configuration for delpoy().
 
     Typical usage::
 
@@ -28,24 +29,30 @@ class Conf(dict):
         self.setdefault(name, {}).update(kw)
 
 
+
 class NotPersistable:
     implements(sob.IPersistable)
     def __init__(self, original):
         self.original = original
 
+
     def setStyle(self, style):
         self.style = style
 
+
     def save(self, tag=None, filename=None, passphrase=None):
         pass
+
 
 
 class StartupError(Exception):
     pass
 
 
+
 class DependencyService(service.MultiService):
-    """A MultiService that can start multiple services with interdependencies.
+    """
+    A MultiService that can start multiple services with interdependencies.
 
     Each keyword parameter is a dict which serves as the options for that
     service.
@@ -70,14 +77,13 @@ class DependencyService(service.MultiService):
     method would not normally be called), StartupError is raised.
     """
 
-
     requiredServices = []
 
 
     def __init__(self, **kw):
         service.MultiService.__init__(self)
 
-        # this makes it possible for one service to change the configuration of
+        # This makes it possible for one service to change the configuration of
         # another. Avoid if possible, there if you need it. Be sure to properly
         # set the dependencies.
         self.config = kw
@@ -87,7 +93,7 @@ class DependencyService(service.MultiService):
         initedServices = Set()
         uninitedServices = Set(services)
 
-        # build dependencies
+        # Build dependencies
         dependencies = {}
         for serv in services:
             try:
@@ -109,7 +115,7 @@ class DependencyService(service.MultiService):
             initializeService(svc)
 
         while uninitedServices:
-            # iterate over the uninitialized services, adding those with no
+            # Iterate over the uninitialized services, adding those with no
             # outstanding dependencies to initThisRound.
             initThisRound = []
             for serv in uninitedServices:
@@ -117,8 +123,9 @@ class DependencyService(service.MultiService):
                     if dep not in initedServices:
                         if dep not in uninitedServices:
                             raise StartupError(
-                                'service %r depends on service %r, which is not '
-                                'configured or does not exist.' % (serv, dep))
+                                'service %r depends on service %r,'
+                                'which is not configured or'
+                                'does not exist.' % (serv, dep))
                         break
                 else:
                     initThisRound.append(serv)
@@ -139,12 +146,21 @@ class DependencyService(service.MultiService):
 
 
     def deploy(Class, name=None, uid=None, gid=None, **kw):
-        """Create an application with the give name, uid, and gid.
+        """
+        Create an application with the give name, uid, and gid.
 
         The application has one child service, an instance of Class
         configured based on the additional keyword arguments passed.
 
         The application is not persistable.
+
+        @param Class:
+        @param name:
+        @param uid:
+        @param gid:
+        @param kw:
+
+        @return:
         """
         svc = Class(**kw)
 
@@ -160,16 +176,26 @@ class DependencyService(service.MultiService):
         return app
     deploy = classmethod(deploy)
 
+
     def attach(self, subservice):
         subservice.setServiceParent(self)
         return subservice
 
+
     def detach(self, subservice):
         subservice.disownServiceParent()
 
+
     def addServer(self, normalPort, sslPort, f, name):
-        """Add a TCP and an SSL server. Name them `name` and `name`+'s'."""
-        tcp = internet.TCPServer(normalPort,f)
+        """
+        Add a TCP and an SSL server. Name them `name` and `name`+'s'.
+
+        @param normalPort:
+        @param sslPort:
+        @param f:
+        @param name:
+        """
+        tcp = internet.TCPServer(normalPort, f)
         tcp.setName(name)
         self.servers.append(tcp)
         if sslPort is not None:
@@ -177,17 +203,21 @@ class DependencyService(service.MultiService):
             ssl.setName(name+'s')
             self.servers.append(ssl)
 
+
     def discernPrivilegedServers(self):
         return [srv for srv in self.servers if srv.args[0] <= 1024]
 
+
     def discernUnprivilegedServers(self):
         return [srv for srv in self.servers if srv.args[0] > 1024]
+
 
     def privilegedStartService(self):
         for server in self.discernPrivilegedServers():
             log.msg("privileged attach %r" % server)
             self.attach(server)
         return service.MultiService.privilegedStartService(self)
+
 
     def startService(self):
         for server in self.discernUnprivilegedServers():

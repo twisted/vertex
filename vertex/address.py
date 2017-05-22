@@ -1,3 +1,5 @@
+# Copyright (c) Twisted Matrix Laboratories.
+# See LICENSE for details.
 from functools import total_ordering
 
 @total_ordering
@@ -6,29 +8,39 @@ class Q2QAddress(object):
         self.resource = resource
         self.domain = domain
 
+
     def domainAddress(self):
-        """ Return an Address object which is the same as this one with ONLY the
-        'domain' attribute set, not 'resource'.
+        """
+        Return an Address object which is the same as this one with ONLY
+        the 'domain' attribute set, not 'resource'.
 
         May return 'self' if 'resource' is already None.
+
+        @return:
         """
         if self.resource is None:
             return self
         else:
             return Q2QAddress(self.domain)
 
+
     def claimedAsIssuerOf(self, cert):
         """
-        Check if the information in a provided certificate *CLAIMS* to be issued by
-        this address.
+        Check if the information in a provided certificate *CLAIMS* to be
+        issued by this address.
 
         PLEASE NOTE THAT THIS METHOD IS IN NO WAY AUTHORITATIVE.  It does not
         perform any cryptographic checks.
 
         Currently this check is if L{Q2QAddress.__str__}C{(self)} is equivalent
         to the commonName on the certificate's issuer.
+
+        @param cert:
+
+        @return:
         """
         return cert.getIssuer().commonName == str(self)
+
 
     def claimedAsSubjectOf(self, cert):
         """
@@ -40,6 +52,10 @@ class Q2QAddress(object):
 
         Currently this check is if L{Q2QAddress.__str__}C{(self)} is equivalent
         to the commonName on the certificate's subject.
+
+        @param cert:
+
+        @return:
         """
         return cert.getSubject().commonName == str(self)
 
@@ -82,6 +98,7 @@ class Q2QAddress(object):
     def __iter__(self):
         return iter((self.resource, self.domain))
 
+
     def __str__(self):
         """
         Return a string of the normalized form of this address.  e.g.::
@@ -95,23 +112,32 @@ class Q2QAddress(object):
             resource = ''
         return (resource + self.domain).encode('utf-8')
 
+
     def __repr__(self):
         return '<Q2Q at %s>' % self.__str__()
+
 
     def __hash__(self):
         return hash(str(self))
 
+
     def fromString(cls, string):
-        args = string.split("@",1)
+        args = string.split("@", 1)
         args.reverse()
         return cls(*args)
     fromString = classmethod(fromString)
+
+
+
 class VirtualTransportAddress:
     def __init__(self, underlying):
         self.underlying = underlying
 
+
     def __repr__(self):
         return 'VirtualTransportAddress(%r)' % (self.underlying,)
+
+
 
 class Q2QTransportAddress:
     """
@@ -136,6 +162,7 @@ class Q2QTransportAddress:
         self.underlying = underlying
         self.logical = logical
         self.protocol = protocol
+
 
     def __repr__(self):
         return 'Q2QTransportAddress(%r, %r, %r)' % (

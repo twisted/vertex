@@ -24,6 +24,10 @@ class AmpTime(Argument):
         """
         Convert the given L{datetime.datetime} into some bytes to serialize to
         AMP.
+
+        @param inObject:
+
+        @return:
         """
         return inObject.strftime("%Y-%m-%dT%H:%M:%S")
 
@@ -32,6 +36,10 @@ class AmpTime(Argument):
         """
         Convert the given string (produced by L{toString}) to a
         L{datetime.datetime}.
+
+        @param inString:
+
+        @return:
         """
         return datetime.datetime.strptime(inString, "%Y-%m-%dT%H:%M:%S")
 
@@ -123,4 +131,3 @@ class Cert(Argument):
     """
     AMP Argument that serializes and deserializes L{Certificate}s.
     """
-

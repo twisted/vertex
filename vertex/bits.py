@@ -1,6 +1,8 @@
-# Copyright 2005 Divmod, Inc.  See LICENSE file for details
+# Copyright (c) Twisted Matrix Laboratories.
+# See LICENSE for details.
 # -*- test-case-name: vertex.test.test_bits -*-
-""" The purpose of this module is to provide the class BitArray, a compact
+"""
+The purpose of this module is to provide the class BitArray, a compact
 overlay onto an array of bytes which is instead bit-addressable.  It also
 includes several bitwise operators.
 
@@ -33,6 +35,7 @@ def operate(operation):
     return __x__
 
 
+
 class BitArray:
     """
     A large mutable array of bits.
@@ -54,13 +57,14 @@ class BitArray:
             size = len(self.bytes) * self.bytes.itemsize * BITS_PER_BYTE
         self.size = size
 
-        # initialize 'on' and 'off' lists to optimize various things
+        # Initialize 'on' and 'off' lists to optimize various things
         self.on = []
         self.off = []
         blists = self.blists = self.off, self.on
 
         for index, bit in enumerate(self):
             blists[bit].append(index)
+
 
     def append(self, bit):
         offt = self.size
@@ -69,16 +73,21 @@ class BitArray:
             self.bytes.append(0)
         self[offt] = bit
 
+
     def any(self, req=1):
         return bool(self.blists[req])
+
 
     def percent(self):
         """
         debugging method; returns a string indicating percentage completion
+
+        @return:
         """
         if not len(self):
             return 'Inf%'
-        return '%0.2f%%'% ((float(self.countbits()) / len(self)) * 100,)
+        return '%0.2f%%' % ((float(self.countbits()) / len(self)) * 100,)
+
 
     def __getitem__(self, bitcount):
         if bitcount < 0:
@@ -88,6 +97,7 @@ class BitArray:
         div, mod = divmod(bitcount, self.bytes.itemsize * BITS_PER_BYTE)
         byte = self.bytes[div]
         return (byte >> mod) & 1
+
 
     def __setitem__(self, bitcount, bit):
         if bitcount < 0:
@@ -100,7 +110,7 @@ class BitArray:
         else:
             self.bytes[div] &= ~(1 << mod)
 
-        # change updating
+        # Change updating
         notbitlist = self.blists[not bit]
         try:
             notbitlist.remove(bitcount)
@@ -110,8 +120,10 @@ class BitArray:
         if bitcount not in bitlist:
             bitlist.append(bitcount)
 
+
     def __len__(self):
         return self.size
+
 
     def __repr__(self):
         l = []
@@ -125,18 +137,21 @@ class BitArray:
         l.append(']')
         return ''.join(l)
 
+
     def countbits(self, on=True):
         return len(self.blists[on])
+
 
     def positions(self, bit):
         """
         An iterator of all positions that a bit holds in this BitArray.
 
         @param bit: 1 or 0
+
+        @return:
         """
         return self.blists[bit][:]
 
     __xor__ = operate(operator.xor)
     __and__ = operate(operator.and_)
     __or__ = operate(operator.or_)
-

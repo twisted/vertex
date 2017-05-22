@@ -1,10 +1,12 @@
+# Copyright (c) Twisted Matrix Laboratories.
+# See LICENSE for details.
 
 import os
 import rfc822
 
 from twisted.python.filepath import FilePath
 
-# import gtk ### pyflakes complains about this, due to the next line
+# We import gtk ### pyflakes complains about this, due to the next line
 import gtk.glade
 
 from vertex.q2qclient import ClientQ2QService
@@ -14,15 +16,20 @@ class _NullCb:
     def __init__(self, name):
         self.name = name
 
+
     def __call__(self, *a, **kw):
         print 'No callback provided for', self.name, a, kw
+
+
 
 class _SignalAttacher:
     def __init__(self, original):
         self.original = original
 
+
     def __getitem__(self, callbackName):
-        return getattr(self.original, callbackName, None) or _NullCb(callbackName)
+        return getattr(
+            self.original, callbackName, None) or _NullCb(callbackName)
 
 GLADE_FILE = os.path.splitext(__file__)[0] + '.glade'
 
@@ -40,8 +47,10 @@ class IdentificationDialog:
         self.okButton = self.xml.get_widget('okbutton1')
         self.plug = plug
 
+
     def identifyCancel(self, event):
         self.identifyWindow.destroy()
+
 
     def identifyOK(self, event):
         idstr = self.addressEntry.get_text()
@@ -65,6 +74,8 @@ class IdentificationDialog:
                 widget.set_sensitive(True)
         D.addCallbacks(itWorked, itDidntWork)
 
+
+
 class AddContactDialog:
     def __init__(self, plug):
         self.xml = gtk.glade.XML(GLADE_FILE, "add_contact_dialog")
@@ -73,14 +84,18 @@ class AddContactDialog:
         self.window.show_all()
         self.plug = plug
 
+
     def doAddContact(self, evt):
         name = self.xml.get_widget("nameentry").get_text()
         addr = self.xml.get_widget("q2qidentry").get_text()
         self.plug.addBuddy(name, addr)
         self.popdownDialog()
 
+
     def popdownDialog(self, evt=None):
         self.window.destroy()
+
+
 
 class AcceptConnectionDialog:
     def __init__(self, d, From, to, protocol):
@@ -95,8 +110,10 @@ class AcceptConnectionDialog:
 
     done = False
 
+
     def destroyit(self, evt):
         self.window.destroy()
+
 
     def acceptConnectionEvt(self, evt):
         self.done = True
@@ -105,12 +122,15 @@ class AcceptConnectionDialog:
         print "WHAT"
         self.window.destroy()
 
+
     def rejectConnectionEvt(self, evt):
         print "DSTRY"
         if not self.done:
             print "DIE!"
             from twisted.python import failure
-            self.d.errback(failure.Failure(KeyError("Connection rejected by user")))
+            self.d.errback(
+                failure.Failure(KeyError("Connection rejected by user"))
+            )
         else:
             print "OK"
 
@@ -122,8 +142,11 @@ class VertexDemoProtocol(Protocol):
     def connectionMade(self):
         print 'CONN MADE'
 
+
     def dataReceived(self, data):
         print 'HOLY SHNIKIES', data
+
+
 
 class VertexFactory(ServerFactory):
     protocol = VertexDemoProtocol
@@ -131,13 +154,16 @@ class VertexFactory(ServerFactory):
     def __init__(self, plug):
         self.plug = plug
 
+
     def startFactory(self):
-        #self.plug.animator.stop(1)
+        # Self.plug.animator.stop(1)
         pass
 
+
     def stopFactory(self):
-        #self.plug.animator.stop(0)
+        # Self.plug.animator.stop(0)
         pass
+
 
 
 class BuddyItem:
@@ -150,11 +176,14 @@ class BuddyItem:
         self.q2qaddress = q2qaddress
         self.plug.loadedBuddies[q2qaddress] = self
 
+
     def initiateFileTransfer(self, evt):
         print 'Initiate transfer with ' + self.alias + self.q2qaddress
 
+
     def addToMenu(self):
         self.plug.section.append(self.menuItem)
+
 
     def removeFromMenu(self):
         self.plug.section.remove(self.menuItem)
@@ -169,6 +198,7 @@ class PlugEntry:
     def __init__(self):
         self.xml = gtk.glade.XML(GLADE_FILE, "notification_popup")
 
+
     def register(self, section):
         print 'REGISTER'
         self.section = section
@@ -178,12 +208,13 @@ class PlugEntry:
             workingdir.child("q2q-certificates").path,
             verifyHook=self.displayVerifyDialog,
             inboundTCPPortnum=8172,
-            # q2qPortnum=8173,
+            # Q2qPortnum=8173,
             udpEnabled=False)
         self.setCurrentID(self.clientService.getDefaultFrom())
         self.buddiesfile = workingdir.child("q2q-buddies.txt")
         self.loadedBuddies = {}
         self.parseBuddies()
+
 
     def parseBuddies(self):
         try:
@@ -196,9 +227,11 @@ class PlugEntry:
                 BuddyItem(self, dispn, addr)
         self.buildContactMenu()
 
+
     def clearContactMenu(self):
         for bud in self.loadedBuddies.values():
             bud.removeFromMenu()
+
 
     def buildContactMenu(self):
         l = self.loadedBuddies.values()
@@ -206,6 +239,7 @@ class PlugEntry:
         l.reverse()
         for bud in l:
             bud.addToMenu()
+
 
     def addBuddy(self, alias, q2qaddr):
         temp = self.buddiesfile.temporarySibling()
@@ -221,25 +255,28 @@ class PlugEntry:
         temp.moveTo(self.buddiesfile)
         self.parseBuddies()
 
+
     def displayVerifyDialog(self, From, to, protocol):
         from twisted.internet import defer
         d = defer.Deferred()
         AcceptConnectionDialog(d, From, to, protocol)
         return d
 
+
     def setCurrentID(self, idName):
 
         if idName is not None:
             currentID = Q2QAddress.fromString(idName)
-            # log in?
-            # self.animator.start()
-            SL = self.xml.get_widget("identifymenuitem").get_children()[0].set_label
+            # Log in?
+            # Self.animator.start()
+            SL = self.xml.get_widget(
+                "identifymenuitem").get_children()[0].set_label
             def loggedIn(result):
                 SL(str(currentID))
                 self.currentID = currentID
             def notLoggedIn(error):
                 SL("Identify")
-                # self.animator.stop(0)
+                # Self.animator.stop(0)
             # This following order is INSANE - you should definitely not have
             # to wait until the LISTEN succeeds to start the service; quite the
             # opposite, you should wait until the service has started, then
@@ -255,6 +292,7 @@ class PlugEntry:
 
     # XXX event handlers
 
+
     def toggleAnimate(self, event):
         if self.animator.animating:
             # SL("Animate")
@@ -263,8 +301,10 @@ class PlugEntry:
             # SL("Stop Animating")
             self.animator.start()
 
+
     def identifyDialog(self, event):
         IdentificationDialog(self.clientService, self)
+
 
     def addContact(self, event):
         AddContactDialog(self)
