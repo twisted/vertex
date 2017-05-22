@@ -1,11 +1,12 @@
 # -*- test-case-name: vertex.test.test_q2q -*-
-# Copyright 2005-2008 Divmod, Inc.  See LICENSE file for details
+# Copyright (c) Twisted Matrix Laboratories.
+# See LICENSE for details.
 
 """
 I{Quotient to Quotient} protocol implementation.
 """
 
-# stdlib
+# Stdlib
 import itertools
 from hashlib import md5
 import struct
@@ -17,7 +18,7 @@ from pprint import pformat
 
 from zope.interface import implements, implementer
 
-# twisted
+# Twisted
 from twisted.internet import reactor, defer, interfaces, protocol, error
 from twisted.internet.main import CONNECTION_DONE
 from twisted.internet.ssl import (
@@ -26,7 +27,7 @@ from twisted.python import log
 from twisted.python.failure import Failure
 from twisted.application import service
 
-# twisted.cred
+# Twisted.cred
 from twisted.cred.checkers import ICredentialsChecker
 from twisted.cred.portal import IRealm, Portal
 from twisted.cred.credentials import IUsernamePassword, UsernamePassword
@@ -37,7 +38,7 @@ from twisted.protocols.amp import (
     StartTLS, ProtocolSwitchCommand, AMP
 )
 
-# vertex
+# Vertex
 from vertex import subproducer, ptcp
 from vertex import endpoint, ivertex
 from vertex.address import (
@@ -67,11 +68,14 @@ class IgnoreConnectionFailed(protocol.ClientFactory):
     def __init__(self, realFactory):
         self.realFactory = realFactory
 
+
     def clientConnectionLost(self, connector, reason):
         self.realFactory.clientConnectionLost(connector, reason)
 
+
     def clientConnectionFailed(self, connector, reason):
         pass
+
 
     def buildProtocol(self, addr):
         return self.realFactory.buildProtocol(addr)
@@ -135,18 +139,23 @@ class Q2QClientProtocolFactoryWrapper:
         connectionEstablishedDeferred.addCallback(self.setMyClient)
 
     myClient = None
+
+
     def setMyClient(self, myClient):
-        # print '***CLIENT SET***', self, self.fromAddress, self.toAddress, self.cpf
         self.myClient = myClient
         return myClient
 
+
     def buildProtocol(self, addr):
-        # xxx modify addr to include q2q information.
+        # XXX modify addr to include q2q information.
         subProto = self.cpf.buildProtocol(self.toAddress)
-        myProto = SeparateConnectionTransport(self.service, subProto, self.fromAddress,
-                                              self.toAddress, self.protocolName,
-                                              self.connectionEstablishedDeferred)
+        myProto = SeparateConnectionTransport(
+            self.service, subProto, self.fromAddress,
+            self.toAddress, self.protocolName,
+            self.connectionEstablishedDeferred
+        )
         return myProto
+
 
     def clientConnectionFailed(self, connector, reason):
         # DON'T forward this to our client protocol factory; only one attempt
@@ -154,24 +163,31 @@ class Q2QClientProtocolFactoryWrapper:
         assert self.myClient is None
         self.connectionEstablishedDeferred.errback(reason)
 
+
     def clientConnectionLost(self, connector, reason):
-        # as in clientConnectionFailed, don't bother to forward; this
+        # As in clientConnectionFailed, don't bother to forward; this
         # clientConnectionLost is actually a clientConnectionFailed for the
         # underlying transport.
         if self.myClient is not None:
-            # forward in this case because it's likely that we need to pass it
+            # Forward in this case because it's likely that we need to pass it
             # along...
             self.cpf.clientConnectionLost(connector, reason)
+
 
     def doStart(self):
         self.cpf.doStart()
 
+
     def doStop(self):
         self.cpf.doStop()
+
+
 
 class ImmediatelyLoseConnection(protocol.Protocol):
     def connectionMade(self):
         self.transport.loseConnection()
+
+
 
 class AbstractConnectionAttempt(protocol.ClientFactory):
 
@@ -202,7 +218,6 @@ class AbstractConnectionAttempt(protocol.ClientFactory):
         """
         raise NotImplementedError()
 
-
     q2qb = None
 
     cancelled = False
@@ -215,17 +230,18 @@ class AbstractConnectionAttempt(protocol.ClientFactory):
             self.connectionID, self.clientProtocolFactory)
         return self.q2qb
 
+
     def clientConnectionFailed(self, connector, reason):
-        """
-        """
         # Don't bother forwarding.  In fact this should probably never be
         # called because we're not bothering to forward them along from
         # Q2QClientProtocolFactoryWrapper
+        pass
+
 
     def clientConnectionLost(self, connector, reason):
-        """
-        """
-        # we don't care - this will be handled by Q2QBootstrap.
+        # We don't care - this will be handled by Q2QBootstrap.
+        pass
+
 
     def cancel(self):
         """
@@ -242,6 +258,7 @@ class AbstractConnectionAttempt(protocol.ClientFactory):
         self.cancelled = True
 
 
+
 class TCPConnectionAttempt(AbstractConnectionAttempt):
     attempted = False
     def startAttempt(self):
@@ -249,6 +266,7 @@ class TCPConnectionAttempt(AbstractConnectionAttempt):
         self.attempted = True
         reactor.connectTCP(self.method.host, self.method.port, self)
         return self.deferred
+
 
 
 class TCPMethod:
@@ -260,17 +278,22 @@ class TCPMethod:
     relayable = True
     ptype = 'tcp'
 
+
     def toString(self):
         return '%s@%s:%d' % (self.ptype, self.host, self.port)
 
+
     def __repr__(self):
         return '<%s>'%self.toString()
+
 
     def attempt(self, *a):
         return [self.attemptFactory(self, *a)]
 
 connectionCounter = itertools.count().next
 connectionCounter()
+
+
 
 class VirtualConnectionAttempt(AbstractConnectionAttempt):
     attempted = False
@@ -290,20 +313,25 @@ class VirtualConnectionAttempt(AbstractConnectionAttempt):
         return d
 
 
+
 class VirtualMethod:
     def __init__(self, virt=None):
         pass
 
     relayable = False
 
+
     def toString(self):
         return 'virtual'
+
 
     def __repr__(self):
         return '<%s>' % (self.toString(),)
 
+
     def attempt(self, *a):
         return [VirtualConnectionAttempt(self, *a)]
+
 
 
 class _PTCPConnectionAttempt1NoPress(AbstractConnectionAttempt):
@@ -317,6 +345,8 @@ class _PTCPConnectionAttempt1NoPress(AbstractConnectionAttempt):
             self.method.host, self.method.port, self,
             svc.sharedUDPPortnum)
         return self.deferred
+
+
 
 class _PTCPConnectionAttemptPress(AbstractConnectionAttempt):
     attempted = False
@@ -333,6 +363,7 @@ class _PTCPConnectionAttemptPress(AbstractConnectionAttempt):
 
         return self.deferred
 
+
     def cancel(self):
         if not self.cancelled:
             self.q2qproto.service.dispatcher.unbindPort(self.newPort)
@@ -340,8 +371,11 @@ class _PTCPConnectionAttemptPress(AbstractConnectionAttempt):
             print('totally wacky, [press] cancelled twice!')
         AbstractConnectionAttempt.cancel(self)
 
+
+
 class PTCPMethod(TCPMethod):
-    """Pseudo-TCP method.
+    """
+    Pseudo-TCP method.
     """
     ptype = 'ptcp'
 
@@ -349,14 +383,18 @@ class PTCPMethod(TCPMethod):
         return [_PTCPConnectionAttempt1NoPress(self, *a),
                 _PTCPConnectionAttemptPress(self, *a)]
 
+
+
 class RPTCPConnectionAttempt(AbstractConnectionAttempt):
     attempted = False
     def startAttempt(self):
         assert not self.attempted
         self.attempted = True
 
-        realLocalUDP = self.newPort = self.q2qproto.service.dispatcher.seedNAT((self.method.host, self.method.port))
-        # self.host and self.port are remote host and port
+        realLocalUDP = self.newPort = self.q2qproto.service.dispatcher.seedNAT(
+            (self.method.host, self.method.port)
+        )
+        # Self.host and self.port are remote host and port
         # realLocalUDP is a local port
 
         # The arguments here are given from the perspective of the recipient of
@@ -366,7 +404,7 @@ class RPTCPConnectionAttempt(AbstractConnectionAttempt):
         # endpoint, the dst is our endpoint, the user we are asking them to
         # send TO is us, the user we are asking them to accept this FROM is us.
 
-        # we include protocol as an arg because this is helpful for relaying.
+        # We include protocol as an arg because this is helpful for relaying.
 
         def enbinden(boundereded):
             if not self.cancelled:
@@ -390,6 +428,7 @@ class RPTCPConnectionAttempt(AbstractConnectionAttempt):
         d.addCallbacks(enbinden, swallowKnown)
         return d
 
+
     def cancel(self):
         if not self.cancelled:
             self.q2qproto.service.dispatcher.unbindPort(self.newPort)
@@ -399,9 +438,9 @@ class RPTCPConnectionAttempt(AbstractConnectionAttempt):
 
 
 
-
 class RPTCPMethod(TCPMethod):
-    """ Certain NATs respond very poorly to seed traffic: e.g. if they receive
+    """
+    Certain NATs respond very poorly to seed traffic: e.g. if they receive
     unsolicited traffic to a particular port, they will make that outbound port
     unavailable for outbound traffic originated internally.  The
     Reverse-Pseudo-TCP method is a way to have the *sender* send the first UDP
@@ -415,12 +454,14 @@ class RPTCPMethod(TCPMethod):
     attemptFactory = RPTCPConnectionAttempt
 
 
+
 class UnknownMethod:
 
     relayable = True
 
     def __init__(self, S):
         self.string = S
+
 
     def attemptConnect(self, q2qproto, connectionID, From, to,
                        protocolName, protocolFactory):
@@ -432,6 +473,8 @@ _methodFactories = {'virtual': VirtualMethod,
                     'tcp': TCPMethod,
                     'ptcp': PTCPMethod,
                     'rptcp': RPTCPMethod}
+
+
 
 class Method(Argument):
     def toString(self, inObj):
@@ -453,6 +496,7 @@ class Method(Argument):
         return factory
 
 
+
 class Secure(StartTLS):
 
     commandName = "secure"
@@ -462,6 +506,8 @@ class Secure(StartTLS):
         ('authorize', Boolean())
         ]
 
+
+
 class Inbound(Command):
     """
     Request information about where to connect to a particular resource.
@@ -469,9 +515,9 @@ class Inbound(Command):
     Generally speaking this is an "I want to connect to you" request.
 
     The format of this request is transport neutral except for the optional
-    'Udp_Source' header, which specifies an IP/Port pair for all receiving peers to
-    send an almost-empty (suggested value of '\\r\\n') UDP packet to to help
-    with NAT traversal issues.
+    'Udp_Source' header, which specifies an IP/Port pair for all receiving
+    peers to send an almost-empty (suggested value of '\\r\\n')
+    UDP packet to to help with NAT traversal issues.
 
     See L{Q2QService.connectQ2Q} for details.
 
@@ -537,8 +583,11 @@ class Inbound(Command):
     errors = {KeyError: "NotFound"}
     fatalErrors = {VerifyError: "VerifyError"}
 
+
+
 class Outbound(Command):
-    """Similar to Inbound, but _requires that the recipient already has the
+    """
+    Similar to Inbound, but _requires that the recipient already has the
     id parameter as an outgoing connection attempt_.
     """
     commandName = 'outbound'
@@ -553,13 +602,18 @@ class Outbound(Command):
 
     errors = {AttemptsFailed: 'AttemptsFailed'}
 
+
+
 def safely(f, *a, **k):
-    """try/except around something, w/ twisted error handling.
+    """
+    try/except around something, w/ twisted error handling.
     """
     try:
-        f(*a,**k)
+        f(*a, **k)
     except:
         log.err()
+
+
 
 class Q2Q(AMP, subproducer.SuperProducer):
     """
@@ -604,6 +658,7 @@ class Q2Q(AMP, subproducer.SuperProducer):
         subproducer.SuperProducer.__init__(self)
         AMP.__init__(self, **kw)
 
+
     def connectionMade(self):
         self.producingTransports = {}
         self.connections = {}
@@ -623,8 +678,8 @@ class Q2Q(AMP, subproducer.SuperProducer):
         else:
             log.msg("Using existing public IP: %r" % (self.service.publicIP,))
 
+
     def connectionLost(self, reason):
-        ""
         AMP.connectionLost(self, reason)
         self._uncacheMe()
         self.producingTransports = {}
@@ -637,20 +692,19 @@ class Q2Q(AMP, subproducer.SuperProducer):
         for observer in self.connectionObservers:
             safely(observer)
 
+
     def notifyOnConnectionLost(self, observer):
-        ""
         self.connectionObservers.append(observer)
 
 
     @BindUDP.responder
     def _bindUDP(self, q2qsrc, q2qdst, udpsrc, udpdst, protocol):
-
-        # we are representing the src, because they are the ones being told to
+        # We are representing the src, because they are the ones being told to
         # originate a UDP packet.
 
         self.verifyCertificateAllowed(q2qsrc, q2qdst)
 
-        # if I've got a local factory for this 3-tuple, do the bind if I own
+        # If I've got a local factory for this 3-tuple, do the bind if I own
         # this IP...
         srchost, srcport = udpsrc
 
@@ -660,10 +714,7 @@ class Q2Q(AMP, subproducer.SuperProducer):
 
         for (listener, listenCert, desc
                  ) in lcget:
-            # print 'looking at listener', listener
-            # print listener.transport.getPeer().host, srchost
             if listener.transport.getPeer().host == srchost:
-                # print 'bound in clients loop'
 
                 d = listener.callRemote(
                     BindUDP,
@@ -677,18 +728,14 @@ class Q2Q(AMP, subproducer.SuperProducer):
                 d.addErrback(swallowKnown)
                 bindery.append(d)
         if bindery:
-            # print 'bindery return', len(bindery)
             def _justADict(ign):
                 return dict()
             return defer.DeferredList(bindery).addCallback(_justADict)
 
-        # print 'what?', lcget
         if (self.service.getLocalFactories(q2qdst, q2qsrc, protocol)
             and srchost == self._determinePublicIP()):
             self.service.dispatcher.seedNAT(udpdst, srcport, conditional=True)
-            # print 'bound locally'
             return dict()
-        # print 'conn-error'
         raise ConnectionError("unable to find appropriate UDP binder")
 
 
@@ -708,7 +755,7 @@ class Q2Q(AMP, subproducer.SuperProducer):
                                  ourAddress,
                                  theirAddress):
         """
-        Check that the certificate currently in use by this transport is valid to
+        Check that the cert currently in use by this transport is valid to
         claim that the connection offers authorization for this host speaking
         for C{ourAddress}, to a host speaking for C{theirAddress}.  The remote
         host (the one claiming to use theirAddress) may have a certificate
@@ -836,7 +883,8 @@ class Q2Q(AMP, subproducer.SuperProducer):
                                           ourCert.getIssuer()))
         if theirClaimedDomain.claimedAsIssuerOf(peerCert):
             # Their domain issued their certificate.
-            if theirAddress.claimedAsSubjectOf(peerCert) or theirClaimedDomain.claimedAsSubjectOf(peerCert):
+            if (theirAddress.claimedAsSubjectOf(peerCert) or
+                theirClaimedDomain.claimedAsSubjectOf(peerCert)):
                 return
         elif ourClaimedDomain.claimedAsIssuerOf(peerCert):
             # *our* domain can spoof *anything*
@@ -853,6 +901,7 @@ class Q2Q(AMP, subproducer.SuperProducer):
             "TheyClaimWeAre: %s TheyClaimTheyAre: %s" %
             (ourCert, peerCert,
              ourAddress, theirAddress))
+
 
     @Listen.responder
     def _listen(self, protocols, From, description):
@@ -894,15 +943,18 @@ class Q2Q(AMP, subproducer.SuperProducer):
                                                      udp_source).addErrback(
             lambda f: f.trap(KeyError) and dict(listeners=[]))
 
+
     def _inboundimpl(self, ign, From, to, protocol, udp_source):
 
         # 2-tuples of factory, description
         srvfacts = self.service.getLocalFactories(From, to, protocol)
 
-        result = []             # list of listener dicts
+        result = []             # List of listener dicts
 
         if srvfacts:
-            log.msg("local factories found for inbound request: %r" % (srvfacts,))
+            log.msg(
+                "local factories found for inbound request: %r" % (srvfacts,)
+            )
             localMethods = []
             publicIP = self._determinePublicIP()
             privateIP = self._determinePrivateIP()
@@ -917,7 +969,9 @@ class Q2Q(AMP, subproducer.SuperProducer):
                             (privateIP, tcpPort)))
 
             if not self.service.udpEnabled:
-                log.msg("udp not enabled -- but I so want to send udp traffic!")
+                log.msg(
+                    "udp not enabled -- but I so want to send udp traffic!"
+                )
             elif udp_source is None:
                 log.msg("udp_source was none on inbound")
             else:
@@ -929,24 +983,31 @@ class Q2Q(AMP, subproducer.SuperProducer):
                     log.msg(
                         "remote PTCP: %s:%d, "
                         "local public IP: %s, local private IP: %s"
-                        % (remoteUDPHost, remoteUDPPort, publicIP, privateIP) )
+                        % (remoteUDPHost, remoteUDPPort, publicIP, privateIP))
 
                     # Seed my NAT from my shared UDP port
-                    udpPort = self.service.dispatcher.seedNAT(udp_source, self.service.sharedUDPPortnum)
+                    udpPort = self.service.dispatcher.seedNAT(
+                        udp_source,
+                        self.service.sharedUDPPortnum
+                    )
 
                     if remoteUDPHost == publicIP and publicIP != privateIP:
                         log.msg(
                             "Remote IP matches local, public IP %r;"
-                            " preferring internal IP %r" % (publicIP, privateIP))
+                            " preferring internal IP %r" % (
+                                publicIP,
+                                privateIP
+                            )
+                        )
                         localMethods.append(
                             PTCPMethod("%s:%d" % (privateIP, udpPort)))
                     localMethods.append(
                         PTCPMethod("%s:%d" % (publicIP, udpPort)))
 
-                    # XXX CLEANUP!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-                    # !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-                    # !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-                    privateUDPPort = self.service.dispatcher.seedNAT(udp_source)
+                    # XXX CLEANUP!
+                    privateUDPPort = self.service.dispatcher.seedNAT(
+                        udp_source
+                    )
                     localMethods.append(
                         PTCPMethod('%s:%d' % (publicIP, privateUDPPort)))
 
@@ -956,7 +1017,10 @@ class Q2Q(AMP, subproducer.SuperProducer):
 
             if self.service.virtualEnabled:
                 localMethods.append(VirtualMethod())
-            log.msg('responding to inbound with local methods: %r' % (localMethods,))
+            log.msg(
+                'responding to inbound with local methods: %r' %
+                (localMethods,)
+            )
 
             for serverFactory, description in srvfacts:
                 expiryTime, listenID = self.service.mapListener(
@@ -968,8 +1032,6 @@ class Q2Q(AMP, subproducer.SuperProducer):
 
             # We've looked for our local factory.  Let's see if we have any
             # listening protocols elsewhere.
-
-
         key = (to, protocol)
         if key in self.service.listeningClients:
             args = dict(From=From,
@@ -985,11 +1047,19 @@ class Q2Q(AMP, subproducer.SuperProducer):
                     self._massageClientInboundResponse, listener, result))
 
             def allListenerResponses(x):
-                log.msg("all inbound responses received: %s" % (pformat(result),))
+                log.msg(
+                    "all inbound responses received: %s" % (pformat(result),)
+                )
                 return dict(listeners=result)
             return defer.DeferredList(DL).addCallback(allListenerResponses)
         else:
-            log.msg("no listenening clients for %s:%r. local methods: %r" % (to,protocol, result))
+            log.msg(
+                "no listenening clients for %s:%r. local methods: %r" % (
+                    to,
+                    protocol,
+                    result
+                )
+            )
             return dict(listeners=result)
 
 
@@ -999,18 +1069,19 @@ class Q2Q(AMP, subproducer.SuperProducer):
                 (inboundResponse, listener))
 
         for listenerInfo in irl:
-            # inboundResponse['description'] = ??? trust client version for
+            # InboundResponse['description'] = ??? trust client version for
             # now... maybe the server doesn't even need to know about
             # descriptions...?
             listenerInfo['methods'] = [
                 meth for meth in listenerInfo['methods'] if meth.relayable]
-            # make sure that the certificate that we're relaying matches the
+            # Make sure that the certificate that we're relaying matches the
             # certificate that they gave us!
             if listenerInfo['methods']:
                 allowedCertificate = Certificate.peerFromTransport(
                     listener.transport)
                 listenerInfo['certificate'] = allowedCertificate
                 result.append(listenerInfo)
+
 
     def _determinePublicIP(self):
         reservePublicIP = None
@@ -1024,6 +1095,7 @@ class Q2Q(AMP, subproducer.SuperProducer):
         if reservePublicIP is not None:
             return reservePublicIP
         return self._determinePrivateIP()
+
 
     def _determinePrivateIP(self):
         return self.transport.getHost().host
@@ -1127,7 +1199,9 @@ class Q2Q(AMP, subproducer.SuperProducer):
 
         uandd = subj.commonName.split("@")
         if len(uandd) != 2:
-            raise BadCertificateRequest("Won't sign certificates for other domains")
+            raise BadCertificateRequest(
+                "Won't sign certificates for other domains"
+            )
         domain = uandd[1]
 
         CS = self.service.certificateStorage
@@ -1195,6 +1269,7 @@ class Q2Q(AMP, subproducer.SuperProducer):
 
     _cachedUnrequested = False
 
+
     def _cacheMeNow(self, From, to, authorize):
         tcpeer = self.transport.getPeer()
         # XXX 'port' is insane here, but we lack a better number to hash
@@ -1205,6 +1280,7 @@ class Q2Q(AMP, subproducer.SuperProducer):
             (From, to.domain, authorize), self)
         assert not self._cachedUnrequested
         self._cachedUnrequested = (From, to, authorize, tcpeer)
+
 
     def _uncacheMe(self):
         if self._cachedUnrequested:
@@ -1217,6 +1293,7 @@ class Q2Q(AMP, subproducer.SuperProducer):
             self.service.secureConnectionCache.connectionLostForKey(
                 (endpoint.TCPEndpoint(tcpeer.host, port),
                  (From, to.domain, authorize)))
+
 
     def _retrieveRemoteCertificate(self, From, port=port):
         """
@@ -1261,8 +1338,10 @@ class Q2Q(AMP, subproducer.SuperProducer):
     def secure(self, fromAddress, toAddress,
                fromCertificate, foreignCertificateAuthority=None,
                authorize=True):
-        """Return a Deferred which fires True when this connection has been secured as
-        a channel between fromAddress (locally) and toAddress (remotely).
+        """
+        Return a Deferred which fires True when this connection has been
+        secured as a channel between fromAddress (locally) and
+        toAddress (remotely).
         Raises an error if this is not possible.
         """
         if self.hostCertificate is not None:
@@ -1282,6 +1361,7 @@ class Q2Q(AMP, subproducer.SuperProducer):
             to=toAddress,
             authorize=authorize, **extra).addCallback(_cbSecure)
 
+
     @Virtual.responder
     def _virtual(self, id):
         if self.isServer:
@@ -1292,11 +1372,10 @@ class Q2Q(AMP, subproducer.SuperProducer):
         # our client _after_ they have processed our ACK.
         tpt = VirtualTransport(self, id, self.service._bootstrapFactory, False)
 
-
         return dict(__transport__=tpt)
 
-
     # Client/Support methods.
+
 
     def attemptConnectionMethods(self, methods, connectionID, From, to,
                                  protocolName, protocolFactory):
@@ -1318,7 +1397,6 @@ class Q2Q(AMP, subproducer.SuperProducer):
             attDef.addErrback(dontLogThat)
 
         def _unfortunate_defer_hack(results):
-            #Do you see what you've made me become?
             if isinstance(results, tuple):
                 stuff = [(False, None)] * len(attemptObjects)
                 stuff[results[1]] = (True, results[0])
@@ -1331,18 +1409,21 @@ class Q2Q(AMP, subproducer.SuperProducer):
             anyResult = False
             for index, (success, result) in enumerate(results):
                 if success:
-                    # woohoo!  home free.
-                    # XXX Cancel outstanding attempts, maybe.  They'll fail anyway,
-                    # because the factory will return None from buildProtocol().
+                    # Woohoo!  home free.
+                    # XXX Cancel outstanding attempts, maybe. Will fail anyway,
+                    # because the factory will return None
+                    # from buildProtocol().
                     theResult = result
                     anyResult = True
                 else:
                     attemptObjects[index].cancel()
             if anyResult:
-                # theResult will be a SeparateConnectionTransport
+                # TheResult will be a SeparateConnectionTransport
                 return theResult.subProtocol
             else:
-                reason = Failure(AttemptsFailed([fobj for (f, fobj) in results]))
+                reason = Failure(AttemptsFailed(
+                    [fobj for (f, fobj) in results])
+                )
                 return reason
 
         d.addCallback(_unfortunate_defer_hack)
@@ -1379,11 +1460,11 @@ class Q2Q(AMP, subproducer.SuperProducer):
                  protocol=protocolName)
 
         if self.service.dispatcher is not None:
-            # tell them exactly where they can shove it
+            # Tell them exactly where they can shove it
             A['udp_source'] = (publicIP,
                                self.service.sharedUDPPortnum)
         else:
-            # don't tell them because we don't know
+            # Don't tell them because we don't know
             log.msg("dispatcher unavailable when connecting")
 
         D = self.callRemote(Inbound, **A)
@@ -1417,8 +1498,12 @@ class Q2Q(AMP, subproducer.SuperProducer):
                     else:
                         failures.append(result)
                 if not succeededAny:
-                    return Failure(AttemptsFailed(
-                            [failure.getBriefTraceback() for failure in failures]))
+                    return Failure(
+                        AttemptsFailed(
+                            [failure.getBriefTraceback()
+                            for failure in failures]
+                        )
+                    )
 
                 # XXX TODO: this connection is really random; connectQ2Q should
                 # not return one of the connections it's made, put it into your
@@ -1428,6 +1513,7 @@ class Q2Q(AMP, subproducer.SuperProducer):
 
             return listenersD.addCallback(finishedAllAttempts)
         return D.addCallback(_connected)
+
 
 
 class SeparateConnectionTransport(object):
@@ -1458,8 +1544,10 @@ class SeparateConnectionTransport(object):
     def getQ2QHost(self):
         return self.q2qhost
 
+
     def getQ2QPeer(self):
         return self.q2qpeer
+
 
     def makeConnection(self, tpt):
         self.transport = tpt
@@ -1468,39 +1556,50 @@ class SeparateConnectionTransport(object):
         if self.connectionEstablishedDeferred is not None:
             self.connectionEstablishedDeferred.callback(self)
 
+
     def getPeer(self):
         return Q2QTransportAddress(self.getQ2QPeer(),
                                    self.transport.getPeer(),
                                    self.protocolName)
+
 
     def getHost(self):
         return Q2QTransportAddress(self.getQ2QHost(),
                                    self.transport.getHost(),
                                    self.protocolName)
 
+
     def dataReceived(self, data):
         self.subProtocol.dataReceived(data)
+
 
     def write(self, data):
         self.transport.write(data)
 
+
     def writeSequence(self, data):
         self.transport.writeSequence(data)
+
 
     def registerProducer(self, producer, streaming):
         self.transport.registerProducer(producer, streaming)
 
+
     def unregisterProducer(self):
         self.transport.unregisterProducer()
 
+
     def loseConnection(self):
         self.transport.loseConnection()
+
 
     def connectionLost(self, reason):
         self.service.subConnections.remove(self)
         if self.subProtocol is not None:
             self.subProtocol.connectionLost(reason)
             self.subProtocol = None
+
+
 
 class RetrieveConnection(ProtocolSwitchCommand):
     commandName = 'Retrieve-Connection'
@@ -1511,6 +1610,8 @@ class RetrieveConnection(ProtocolSwitchCommand):
 
     fatalErrors = {KeyError: "NoSuchConnection"}
 
+
+
 class Q2QBootstrap(AMP):
     def __init__(self, connIdentifier=None, protoFactory=None):
         AMP.__init__(self)
@@ -1518,14 +1619,20 @@ class Q2QBootstrap(AMP):
         self.connIdentifier = connIdentifier
         self.protoFactory = protoFactory
 
+
     def connectionMade(self):
         if self.connIdentifier is not None:
             def swallowKnown(err):
                 err.trap(error.ConnectionDone, KeyError)
-            self.retrieveConnection(self.connIdentifier, self.protoFactory).addErrback(swallowKnown)
+            self.retrieveConnection(
+                self.connIdentifier,
+                self.protoFactory
+            ).addErrback(swallowKnown)
+
 
     def whoami(self):
-        """Return a Deferred which fires with a 2-tuple of (dotted quad ip, port
+        """
+        Return a Deferred which fires with a 2-tuple of (dotted quad ip, port
         number).
         """
         def cbWhoAmI(result):
@@ -1542,7 +1649,11 @@ class Q2QBootstrap(AMP):
 
 
     def retrieveConnection(self, identifier, factory):
-        return self.callRemote(RetrieveConnection, factory, identifier=identifier)
+        return self.callRemote(
+            RetrieveConnection,
+            factory,
+            identifier=identifier
+        )
 
 
     def _retrieveConnection(self, identifier):
@@ -1550,7 +1661,9 @@ class Q2QBootstrap(AMP):
         if listenerInfo is None:
             raise KeyError(identifier)
         else:
-            proto = listenerInfo.protocolFactory.buildProtocol(listenerInfo.From)
+            proto = listenerInfo.protocolFactory.buildProtocol(
+                listenerInfo.From
+            )
             return SeparateConnectionTransport(
                     self.service,
                     proto,
@@ -1568,13 +1681,20 @@ class Q2QBootstrapFactory(protocol.Factory):
     def __init__(self, service):
         self.service = service
 
+
     def buildProtocol(self, addr):
         q2etc = protocol.Factory.buildProtocol(self, addr)
         q2etc.service = self.service
         return q2etc
 
+
+
 class VirtualTransport(subproducer.SubProducer):
-    implements(interfaces.IProducer, interfaces.ITransport, interfaces.IConsumer)
+    implements(
+        interfaces.IProducer,
+        interfaces.ITransport,
+        interfaces.IConsumer
+    )
     disconnecting = False
 
     def __init__(self, q2q, connectionID, protocolFactory, isClient):
@@ -1602,23 +1722,27 @@ class VirtualTransport(subproducer.SubProducer):
 
     protocol = None
 
+
     def startProtocol(self):
         self.protocol = self.protocolFactory.buildProtocol(self.getPeer())
         self.protocol.makeConnection(self)
         return self.protocol
 
+
     def pauseProducing(self):
         self.q2q.callRemote(Choke, id=self.id)
+
 
     def resumeProducing(self):
         self.q2q.callRemote(Unchoke, id=self.id)
 
+
     def writeSequence(self, iovec):
         self.write(''.join(iovec))
 
+
     def loseConnection(self):
         if self.disconnecting:
-            # print 'omg wtf loseConnection!???!'
             return
         self.disconnecting = True
         d = self.q2q.callRemote(Close, id=self.id)
@@ -1659,11 +1783,14 @@ class VirtualTransport(subproducer.SubProducer):
             log.err(reason)
             self.connectionLost(reason)
 
+
     def write(self, data):
         self.q2q.callRemote(Write, body=data, id=self.id)
 
+
     def getHost(self):
         return VirtualTransportAddress(self.q2q.transport.getHost())
+
 
     def getPeer(self):
         return VirtualTransportAddress(self.q2q.transport.getPeer())
@@ -1677,12 +1804,15 @@ def _nextJuiceLog():
     finally:
         _counter = _counter + 1
 
+
+
 class DefaultQ2QAvatar:
     implements(ivertex.IQ2QUser)
 
     def __init__(self, username, domain):
         self.username = username
         self.domain = domain
+
 
     def signCertificateRequest(self, certificateRequest,
                                domainCert, suggestedSerial):
@@ -1770,10 +1900,11 @@ class DefaultCertificateStore:
 
     credentialInterfaces = [IUsernamePassword]
 
+
     def requestAvatar(self, avatarId, mind, interface):
         assert interface is ivertex.IQ2QUser, (
             "default certificate store only supports one interface")
-        return interface, DefaultQ2QAvatar(*avatarId.split("@")), lambda : None
+        return interface, DefaultQ2QAvatar(*avatarId.split("@")), lambda: None
 
 
     def requestAvatarId(self, credentials):
@@ -1809,11 +1940,14 @@ class DefaultCertificateStore:
         self.localStore = {}
         self.users = _InMemoryUserStore()
 
+
     def getSelfSignedCertificate(self, domainName):
         return defer.maybeDeferred(self.remoteStore.__getitem__, domainName)
 
+
     def addUser(self, domain, username, privateSecret):
         return self.users.store(domain, username, privateSecret)
+
 
     def storeSelfSignedCertificate(self, domainName, mainCert):
         """
@@ -1822,7 +1956,12 @@ class DefaultCertificateStore:
         stored successfully.
         """
         assert not isinstance(mainCert, str)
-        return defer.maybeDeferred(self.remoteStore.__setitem__, domainName, mainCert)
+        return defer.maybeDeferred(
+            self.remoteStore.__setitem__,
+            domainName,
+            mainCert
+        )
+
 
     def getPrivateCertificate(self, domainName):
         """
@@ -1836,6 +1975,7 @@ class DefaultCertificateStore:
     def genSerial(self, name):
         return abs(struct.unpack('!i', md5(name).digest()[:4])[0])
 
+
     def addPrivateCertificate(self, subjectName, existingCertificate=None):
         """
         Add a PrivateCertificate object to this store for this subjectName.
@@ -1847,15 +1987,19 @@ class DefaultCertificateStore:
             mainDN = DistinguishedName(commonName=subjectName)
             mainKey = KeyPair.generate()
             mainCertReq = mainKey.certificateRequest(mainDN)
-            mainCertData = mainKey.signCertificateRequest(mainDN, mainCertReq,
-                                                          lambda dn: True,
-                                                          self.genSerial(subjectName))
+            mainCertData = mainKey.signCertificateRequest(
+                mainDN, mainCertReq,
+                lambda dn: True,
+                self.genSerial(subjectName)
+            )
             mainCert = mainKey.newCertificate(mainCertData)
         else:
             mainCert = existingCertificate
         self.localStore[subjectName] = mainCert
 
 import os
+
+
 
 class _pemmap(object):
     def __init__(self, pathname, certclass):
@@ -1866,19 +2010,23 @@ class _pemmap(object):
             pass
         self.certclass = certclass
 
+
     def file(self, name, mode):
         try:
             return open(os.path.join(self.pathname, name)+'.pem', mode)
         except IOError as ioe:
             raise KeyError(name, ioe)
 
+
     def __setitem__(self, key, cert):
         kn = cert.getSubject().commonName
         assert kn == key
         self.file(kn, 'wb').write(cert.dumpPEM())
 
+
     def __getitem__(self, cn):
         return self.certclass.loadPEM(self.file(cn, 'rb').read())
+
 
     def iteritems(self):
         files = os.listdir(self.pathname)
@@ -1888,19 +2036,24 @@ class _pemmap(object):
                 value = self[key]
                 yield key, value
 
+
     def items(self):
         return list(self.iteritems())
+
 
     def iterkeys(self):
         for k, v in self.iteritems():
             yield k
 
+
     def keys(self):
         return list(self.iterkeys())
+
 
     def itervalues(self):
         for k, v in self.iteritems():
             yield v
+
 
     def values(self):
         return list(self.itervalues())
@@ -1913,6 +2066,8 @@ class DirectoryCertificateStore(DefaultCertificateStore):
                                    Certificate)
         self.localStore = _pemmap(os.path.join(filepath, 'private'),
                                   PrivateCertificate)
+
+
 
 class MessageSender(AMP):
     """
@@ -1933,6 +2088,7 @@ class Q2QClientFactory(protocol.ClientFactory):
     def __init__(self, service):
         self.service = service
 
+
     def buildProtocol(self, addr):
         p = protocol.ClientFactory.buildProtocol(self, addr)
         p.isServer = False
@@ -1940,6 +2096,8 @@ class Q2QClientFactory(protocol.ClientFactory):
         p.factory = self
         p.wrapper = self.service.wrapper
         return p
+
+
 
 class AddressDiscoveryProtocol(Q2QBootstrap):
     def __init__(self, addrDiscDef):
@@ -1956,25 +2114,32 @@ class _AddressDiscoveryFactory(protocol.ClientFactory):
     def __init__(self, addressDiscoveredDeferred):
         self.addressDiscoveredDeferred = addressDiscoveredDeferred
 
+
     def clientConnectionFailed(self, connector, reason):
         self.addressDiscoveredDeferred.errback(reason)
+
 
     def clientConnectionLost(self, connector, reason):
         """
         """
+
 
     def buildProtocol(self, addr):
         adp = AddressDiscoveryProtocol(self.addressDiscoveredDeferred)
         return adp
 
 
+
 def _noResults(*x):
     return []
+
+
 
 class PTCPConnectionDispatcher(object):
     def __init__(self, factory):
         self.factory = factory
         self._ports = {}
+
 
     def seedNAT(self, hostport, sourcePort=0, conditional=True):
         (host, port) = hostport
@@ -1983,8 +2148,10 @@ class PTCPConnectionDispatcher(object):
                 if conditional:
                     return None
                 else:
-                    raise AssertionError('tried to seed %r in %r %r %r' %
-                                         (sourcePort, self, self._ports, self.factory.service))
+                    raise AssertionError(
+                        'tried to seed %r in %r %r %r' %
+                        (sourcePort, self, self._ports, self.factory.service)
+                    )
             sourcePort = self.bindNewPort(sourcePort)
         else:
             assert sourcePort != 0
@@ -1992,23 +2159,27 @@ class PTCPConnectionDispatcher(object):
         p.write('NAT!', (host, port))
         return sourcePort
 
+
     def bindNewPort(self, portNum=0, iface=''):
         iPortNum = portNum
         proto = ptcp.PTCP(self.factory)
         p = reactor.listenUDP(portNum, proto, interface=iface)
         portNum = p.getHost().port
-        log.msg("Binding PTCP/UDP %d=%d" % (iPortNum,portNum))
+        log.msg("Binding PTCP/UDP %d=%d" % (iPortNum, portNum))
         self._ports[portNum] = (p, proto)
         return portNum
+
 
     def unbindPort(self, portNum):
         log.msg("Unbinding PTCP/UDP %d" % portNum)
         port, proto = self._ports.pop(portNum)
         proto.cleanupAndClose()
 
+
     def connectPTCP(self, host, port, factory, sourcePort):
         p, proto = self._ports[sourcePort]
         return proto.connect(factory, host, port)
+
 
     def iterconnections(self):
         for (p, proto) in self._ports.itervalues():
@@ -2016,8 +2187,8 @@ class PTCPConnectionDispatcher(object):
                 if c.protocol is not None:
                     yield c.protocol
                 else:
-                    # print 'NOT yielding', c, 'in', c.state
                     pass
+
 
     def killAllConnections(self):
         dl = []
@@ -2027,6 +2198,7 @@ class PTCPConnectionDispatcher(object):
             dl.append(defer.maybeDeferred(p.stopListening))
         self._ports = {}
         return defer.DeferredList(dl)
+
 
 
 class Q2QService(service.MultiService, protocol.ServerFactory):
@@ -2046,7 +2218,7 @@ class Q2QService(service.MultiService, protocol.ServerFactory):
         #Methods_of_translation>}.
     @type sharedUDPPortnum: L{int}
     """
-    # server factory stuff
+    # Server factory stuff
     publicIP = None
     _publicIPIsReallyPrivate = False
 
@@ -2057,6 +2229,7 @@ class Q2QService(service.MultiService, protocol.ServerFactory):
     def __repr__(self):
         return '<Q2QService %r@%x>' % (self.debugName, id(self))
 
+
     def buildProtocol(self, addr):
         p = protocol.ServerFactory.buildProtocol(self, addr)
         p.isServer = True
@@ -2065,15 +2238,17 @@ class Q2QService(service.MultiService, protocol.ServerFactory):
         p.wrapper = self.wrapper
         return p
 
+
     def iterconnections(self):
         """
-        Iterator of all connections associated with this service, whether cached or
-        not.  For testing purposes only.
+        Iterator of all connections associated with this service,
+        whether cached or not.  For testing purposes only.
         """
         return itertools.chain(
             self.secureConnectionCache.cachedConnections.itervalues(),
             iter(self.subConnections),
             (self.dispatcher or ()) and self.dispatcher.iterconnections())
+
 
     def __init__(self,
                  protocolFactoryFactory=None,
@@ -2104,29 +2279,31 @@ class Q2QService(service.MultiService, protocol.ServerFactory):
         if certificateStorage is None:
             certificateStorage = DefaultCertificateStore()
             if portal is None:
-                portal = Portal(certificateStorage, checkers=[certificateStorage])
+                portal = Portal(
+                    certificateStorage, checkers=[certificateStorage]
+                )
         self.certificateStorage = certificateStorage
 
-        # allow protocols to wrap message handlers in transactions.
+        # Allow protocols to wrap message handlers in transactions.
         self.wrapper = wrapper
 
-        # clients which have registered for network events: maps {(q2q_id,
+        # Clients which have registered for network events: maps {(q2q_id,
         # protocol_name): clientQ2QProtocol}
         self.listeningClients = {}
 
-        self.inboundConnections = {} # map of str(Id) to _ConnectionWaiter
-        self.q2qPortnum = q2qPortnum # port number for q2q
+        self.inboundConnections = {}  # Map of str(Id) to _ConnectionWaiter
+        self.q2qPortnum = q2qPortnum  # port number for q2q
 
-        # port number for inbound almost-raw TCP
+        # Port number for inbound almost-raw TCP
         self.inboundTCPPortnum = inboundTCPPortnum
 
-        # list of independent TCP connections relaying Q2Q traffic.
+        # List of independent TCP connections relaying Q2Q traffic.
         self.subConnections = []
 
-        # map of {(fromAddress, protocolName): [(factory, description)]}
+        # Map of {(fromAddress, protocolName): [(factory, description)]}
         self.localFactoriesMapping = {}
 
-        # currently only used for password-lookup for SIGN, but should be
+        # Currently only used for password-lookup for SIGN, but should be
         # invoked for everything related to connection setup.
         self.portal = portal
 
@@ -2144,8 +2321,10 @@ class Q2QService(service.MultiService, protocol.ServerFactory):
 
     _publicUDPPort = None
 
+
     def verifyHook(self, From, to, protocol):
         return defer.succeed(1)
+
 
     def _retrievePublicUDPPortNumber(self, registrationServerAddress):
         # Create a PTCP port, bounce some traffic off the indicated server,
@@ -2203,6 +2382,7 @@ class Q2QService(service.MultiService, protocol.ServerFactory):
         D.addCallback(_secured)
         return D
 
+
     def requestCertificateForAddress(self, fromAddress, sharedSecret):
         """
         Connect to the authoritative server for the domain part of the given
@@ -2223,12 +2403,11 @@ class Q2QService(service.MultiService, protocol.ServerFactory):
         kp = KeyPair.generate()
         subject = DistinguishedName(commonName=str(fromAddress))
         reqobj = kp.requestObject(subject)
-        # create worthless, self-signed certificate for the moment, it will be
+        # Create worthless, self-signed certificate for the moment, it will be
         # replaced later.
-
-        #attemptAddress = q2q.Q2QAddress(fromAddress.domain,
+        # attemptAddress = q2q.Q2QAddress(fromAddress.domain,
         #   fromAddress.resource + '+attempt')
-        # fakeSubj = DistinguishedName(commonName=str(attemptAddress))
+        #   fakeSubj = DistinguishedName(commonName=str(attemptAddress))
         fakereq = kp.requestObject(subject)
         ssigned = kp.signRequestObject(subject, fakereq, 1)
         certpair = PrivateCertificate.fromCertificateAndKeyPair
@@ -2254,11 +2433,13 @@ class Q2QService(service.MultiService, protocol.ServerFactory):
 
 
     def authorize(self, fromAddress, password):
-        """To-be-deprecated synonym for requestCertificateForAddress
+        """
+        To-be-deprecated synonym for requestCertificateForAddress
         """
         return self.requestCertificateForAddress(fromAddress, password)
 
     _lastConnID = 1
+
 
     def _nextConnectionID(self, From, to):
         lcid = self._lastConnID
@@ -2267,7 +2448,9 @@ class Q2QService(service.MultiService, protocol.ServerFactory):
             From, to, lcid)
         return fmt
 
-    def mapListener(self, to, From, protocolName, protocolFactory, isClient=False):
+
+    def mapListener(self, to, From, protocolName, protocolFactory,
+        isClient=False):
         """
         Returns 2-tuple of (expiryTime, listenerID)
         """
@@ -2277,31 +2460,45 @@ class Q2QService(service.MultiService, protocol.ServerFactory):
                                  listenerID)
         expires = datetime.datetime(*time.localtime(call.getTime())[:7])
         self.inboundConnections[listenerID] = (
-            _ConnectionWaiter(From, to, protocolName, protocolFactory, isClient),
-            call)
+            _ConnectionWaiter(
+                From, to, protocolName, protocolFactory, isClient
+            ),
+            call
+        )
         return expires, listenerID
+
 
     def unmapListener(self, listenID):
         del self.inboundConnections[listenID]
 
+
     def lookupListener(self, listenID):
-        """(internal)
+        """
+        (internal)
 
         Retrieve a waiting connection by its connection identifier, passing in
         the transport to be used to connect the waiting protocol factory to.
         """
         if listenID in self.inboundConnections:
-            # make the connection?
+            # Make the connection?
             cwait, call = self.inboundConnections.pop(listenID)
             # _ConnectionWaiter instance
             call.cancel()
             return cwait
-        # raise KeyError(listenID)
+        # Raise KeyError(listenID)
+
 
     def getLocalFactories(self, From, to, protocolName):
         """
         Returns a list of 2-tuples of (protocolFactory, description) to handle
         this from/to/protocolName
+
+        @param From:
+        @param to:
+        @param protocolName:
+
+        @return:
+
         """
         result = []
         x = self.localFactoriesMapping.get((to, protocolName), ())
@@ -2310,14 +2507,13 @@ class Q2QService(service.MultiService, protocol.ServerFactory):
         result.extend(y)
         return result
 
-
     q2qPort = None
     inboundTCPPort = None
     inboundUDPPort = None
     dispatcher = None
     sharedUDPPortnum = None
 
-    udpEnabled = True          # pretty much you never want to turn this off
+    udpEnabled = True          # Pretty much you never want to turn this off
                                # except in the unit tests, or in some kind of
                                # pathological network condition
 
@@ -2332,7 +2528,10 @@ class Q2QService(service.MultiService, protocol.ServerFactory):
             self.q2qPort = reactor.listenTCP(self.q2qPortnum, self)
             self.q2qPortnum = self.q2qPort.getHost().port
             if self.dispatcher is not None:
-                self.sharedUDPPortnum = self.dispatcher.bindNewPort(self.q2qPortnum, iface=self.publicIP or '')
+                self.sharedUDPPortnum = self.dispatcher.bindNewPort(
+                    self.q2qPortnum,
+                    iface=self.publicIP or ''
+                )
 
         if self.inboundTCPPortnum is not None:
             self.inboundTCPPort = reactor.listenTCP(
@@ -2343,6 +2542,7 @@ class Q2QService(service.MultiService, protocol.ServerFactory):
             self.sharedUDPPortnum = self.dispatcher.bindNewPort()
 
         return service.MultiService.startService(self)
+
 
     def stopService(self):
         dl = []
@@ -2365,7 +2565,8 @@ class Q2QService(service.MultiService, protocol.ServerFactory):
     def connectQ2Q(self, fromAddress, toAddress, protocolName, protocolFactory,
                    usePrivateCertificate=None, fakeFromDomain=None,
                    chooser=None):
-        """ Connect a named protocol factory from a resource@domain to a
+        """
+        Connect a named protocol factory from a resource@domain to a
         resource@domain.
 
         This is analagous to something like connectTCP, in that it creates a
@@ -2421,7 +2622,7 @@ class Q2QService(service.MultiService, protocol.ServerFactory):
         initiating the 'secure' call.  Mostly for testing different invalid
         certificate attacks.
 
-        @param fakeDomainName: This domain name will be used for an argument to
+        @param fakeFromDomain: This domain name will be used for an argument to
         the 'connect' command, but NOT as an argument to the SECURE command.
         This is to test a particular kind of invalid cert attack.
 
@@ -2431,13 +2632,18 @@ class Q2QService(service.MultiService, protocol.ServerFactory):
         factory.  May return a Deferred.
 
         @default chooser: C{lambda x: x and [x[0]]}
+
+        @return:
         """
         if chooser is None:
             chooser = lambda x: x and [x[0]]
 
         def onSecureConnection(protocol):
             if fakeFromDomain:
-                connectFromAddress = Q2QAddress(fakeFromDomain, toAddress.resource)
+                connectFromAddress = Q2QAddress(
+                    fakeFromDomain,
+                    toAddress.resource
+                )
             else:
                 connectFromAddress = fromAddress
 
@@ -2486,11 +2692,14 @@ class Q2QService(service.MultiService, protocol.ServerFactory):
             connection.
         @type port: L{int}
 
+        @param usePrivateCertificate:
+        @param authorize: 
+
         @return: A L{Deferred} firing with a connected L{Q2Q} where the peer is
             the I{domain part} of the given C{toAddress}.
         """
 
-        # secure connections using users as clients will have to be established
+        # Secure connections using users as clients will have to be established
         # using the 'secure' method differently than this does: we are ONLY
         # capable of connecting to other domains (supernodes)
 
@@ -2501,14 +2710,23 @@ class Q2QService(service.MultiService, protocol.ServerFactory):
             if usePrivateCertificate:
                 ourCert = usePrivateCertificate
                 cacheFrom = fromAddress
-                log.msg('Using fakie private cert:', fromAddress, ourCert, cacheFrom)
+                log.msg(
+                    'Using fakie private cert:',
+                    fromAddress,
+                    ourCert,
+                    cacheFrom
+                )
             elif fromAddress.domain == '':
-                assert fromAddress.resource == '', "No domain means anonymous, bozo: %r" % (fromAddress,)
-                # we are actually anonymous, whoops!
+                assert all( 
+                    fromAddress.resource == '',
+                    "No domain means anonymous, %r" % (fromAddress,)
+                )
+                
+                # We are actually anonymous, whoops!
                 authorize = False
-                # we need to create our own certificate
+                # We need to create our own certificate
                 ourCert = KeyPair.generate().selfSignedCert(218374, CN='@')
-                # feel free to cache the anonymous certificate we just made, whatever
+                # Feel free to cache the anonymous certificate we just made
                 cacheFrom = fromAddress
                 log.msg("Using anonymous cert for anonymous user.")
             else:
@@ -2517,14 +2735,24 @@ class Q2QService(service.MultiService, protocol.ServerFactory):
                     x = fromAddress.domainAddress()
                     ourCert = GPS(str(x))
                     cacheFrom = x
-                    log.msg('domain on behalf of user:', fromAddress, ourCert, cacheFrom)
+                    log.msg(
+                        'domain on behalf of user:',
+                        fromAddress,
+                        ourCert,
+                        cacheFrom
+                    )
                 except KeyError:
                     # Nope, guess not.  Are we actually that user?
                     try:
                         x = fromAddress
                         ourCert = GPS(str(x))
                         cacheFrom = x
-                        log.msg( 'actual user:', fromAddress, ourCert, cacheFrom)
+                        log.msg(
+                            'actual user:',
+                            fromAddress,
+                            ourCert,
+                            cacheFrom
+                        )
                     except KeyError:
                         # Hmm.  We're not that user either.  Are we trying to
                         # pretend to be a user from a *different* domain, to
@@ -2536,7 +2764,12 @@ class Q2QService(service.MultiService, protocol.ServerFactory):
                             x = toDomain
                             ourCert = GPS(str(x))
                             cacheFrom = x
-                            log.msg('fakie domain cert:', fromAddress, ourCert, cacheFrom)
+                            log.msg(
+                                'fakie domain cert:',
+                                fromAddress,
+                                ourCert,
+                                cacheFrom
+                            )
                         except KeyError:
                             raise VerifyError(
                                 "We tried to secure a connection "
@@ -2550,12 +2783,17 @@ class Q2QService(service.MultiService, protocol.ServerFactory):
                     str(toDomain))
                 def nocert(failure):
                     failure.trap(KeyError)
-                    identD = proto.callRemote(Identify, subject=toDomain).addCallback(
-                        lambda x: x['certificate'])
+                    identD = proto.callRemote(
+                        Identify, subject=toDomain
+                    ).addCallback(
+                            lambda x: x['certificate'])
                     def storeit(certificate):
-                        return self.certificateStorage.storeSelfSignedCertificate(
-                            str(toDomain), certificate
+                        return (
+                            self.certificateStorage.storeSelfSignedCertificate(
+                                str(toDomain),
+                                certificate
                             ).addCallback(lambda x: certificate)
+                        )
                     return identD.addCallback(storeit)
                 certD.addErrback(nocert)
                 def gotcert(foreignCA):
