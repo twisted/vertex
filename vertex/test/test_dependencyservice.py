@@ -1,4 +1,5 @@
-# Copyright 2005 Divmod, Inc.  See LICENSE file for details
+# Copyright (c) Twisted Matrix Laboratories.
+# See LICENSE for details.
 from twisted.trial import unittest
 
 from vertex import depserv
@@ -11,17 +12,21 @@ class Serv(depserv.DependencyService):
         self.initialized = []
         depserv.DependencyService.__init__(self, **kw)
 
+
     def setup_ONE(self):
         self.initialized.append('ONE')
 
+
     def setup_TWO(self):
         self.initialized.append('TWO')
+
 
     def setup_THREE(self):
         self.initialized.append('THREE')
 
 
-class TestDependencyService(unittest.TestCase):
+
+class DependencyServiceTests(unittest.TestCase):
 
     def test_depends(self):
         class One(Serv):
@@ -56,7 +61,9 @@ class TestDependencyService(unittest.TestCase):
 
 
     def test_requiredWithDependency(self):
-        """A service is required but has dependencies"""
+        """
+        A service is required but has dependencies
+        """
 
         class One(Serv):
             def depends_ONE(self):
@@ -66,4 +73,6 @@ class TestDependencyService(unittest.TestCase):
         except depserv.StartupError:
             pass
         else:
-            raise unittest.FailTest, 'unsatisfied dependencies did not raise an error'
+            raise(
+                unittest.FailTest, 'unsatisfied dependencies did not raise an error'
+            )

@@ -1,4 +1,5 @@
-# Copyright 2005 Divmod, Inc.  See LICENSE file for details
+# Copyright (c) Twisted Matrix Laboratories.
+# See LICENSE for details.
 
 from twisted.python.failure import Failure
 from twisted.python.filepath import FilePath
@@ -32,12 +33,14 @@ class TestBase(unittest.TestCase):
                                        sigma.BaseNexusUI(self.mktemp()),
                                        svc.callLater)
 
+
     def tearDown(self):
         self.senderNexus.stopService()
         sigma.CHUNK_SIZE = self.realChunkSize
 
 
-class BasicTransferTest(TestBase):
+
+class BasicTransferTests(TestBase):
     def setUp(self):
         TestBase.setUp(self)
         self.stoppers = []
@@ -53,7 +56,7 @@ class BasicTransferTest(TestBase):
             stopper.stopService()
 
 
-    def testOneSenderOneRecipient(self):
+    def test_OneSenderOneRecipient(self):
         self.senderNexus.push(self.sfile, 'TESTtoTEST', [receiver])
         self.service.flush()
         peerThingyoes = childrenOf(self.receiverNexus.ui.basepath)
@@ -67,7 +70,8 @@ class BasicTransferTest(TestBase):
         self.assertEquals(rfdata, TEST_DATA,
                           "file values unequal")
 
-    def testOneSenderManyRecipients(self):
+
+    def test_OneSenderManyRecipients(self):
         raddresses = [Q2QAddress("receiving-data.org", "receiver%d" % (x,))
                       for x in range(10)]
 
@@ -98,7 +102,8 @@ class BasicTransferTest(TestBase):
                               "file value mismatch")
 
 
-class TestSigmaConnectionCache(unittest.TestCase):
+
+class SigmaConnectionCacheTests(unittest.TestCase):
     """
     Tests for the interaction of L{sigma.SigmaProtocol} and
     L{conncache.ConnectionCache}.
@@ -129,6 +134,7 @@ class TestSigmaConnectionCache(unittest.TestCase):
         self.successResultOf(d)
 
 
+
 def childrenOf(x):
-    # this should be a part of FilePath, but hey
+    # This should be a part of FilePath, but hey
     return map(x.child, x.listdir())

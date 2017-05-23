@@ -1,4 +1,9 @@
+# Copyright (c) Twisted Matrix Laboratories.
+# See LICENSE for details.
 
+"""
+Tests for L{vertex.subproducer}.
+"""
 from twisted.trial import unittest
 
 from vertex.subproducer import SuperProducer, SubProducer
@@ -10,29 +15,37 @@ class TestSuper(SuperProducer):
         self.producer = producer
         self.streamingProducer = streaming
 
+
     def unregisterProducer(self):
         self.producer = None
+
+
 
 class TestProducer:
     def __init__(self):
         self.calls = []
 
+
     def resumeProducing(self):
         self.calls.append('resume')
+
 
     def pauseProducing(self):
         self.calls.append('pause')
 
+
     def stopProducing(self):
         self.calls.append('stop')
+
 
     def clear(self):
         del self.calls[:]
 
 
-class SuperProducerTest(unittest.TestCase):
 
-    def testBasicNotification(self):
+class SuperProducerTests(unittest.TestCase):
+
+    def test_BasicNotification(self):
         sup = TestSuper()
         sub = SubProducer(sup)
 
@@ -46,7 +59,8 @@ class SuperProducerTest(unittest.TestCase):
         self.assertEquals(tp2.calls, [])
         sub.unregisterProducer()
 
-    def testPauseSuperBeforeRegister(self):
+
+    def test_PauseSuperBeforeRegister(self):
         sup = TestSuper()
         sub1 = SubProducer(sup)
         sub2 = SubProducer(sup)
@@ -57,9 +71,9 @@ class SuperProducerTest(unittest.TestCase):
         sub1.registerProducer(tp1, False)
         sub2.registerProducer(tp2, False)
 
-        self.assertEquals(sup.producer, sup) # Make sure it's registered with
-                                             # itself; IOW it has called
-                                             # self.transport.registerProducer(self).
+        self.assertEquals(sup.producer, sup)
+        # Make sure it's registered with itself; IOW it has called
+        # self.transport.registerProducer(self).
 
         sup.pauseProducing()
         sup.resumeProducing()
@@ -72,7 +86,7 @@ class SuperProducerTest(unittest.TestCase):
         self.assertEquals(tp2.calls, ['resume', 'pause', 'resume', 'stop'])
 
 
-    def testNonStreamingChoke(self):
+    def test_NonStreamingChoke(self):
         sup = TestSuper()
         sub1 = SubProducer(sup)
         sub2 = SubProducer(sup)
@@ -136,7 +150,8 @@ class SuperProducerTest(unittest.TestCase):
         self.assertEquals(tp1.calls, ['stop'])
         self.assertEquals(tp2.calls, ['stop'])
 
-    def testStreamingChoke(self):
+
+    def test_StreamingChoke(self):
         sup = TestSuper()
         sub1 = SubProducer(sup)
         sub2 = SubProducer(sup)

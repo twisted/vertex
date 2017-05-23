@@ -1,4 +1,5 @@
-# Copyright 2005 Divmod, Inc.  See LICENSE file for details
+# Copyright (c) Twisted Matrix Laboratories.
+# See LICENSE for details.
 # -*- test-case-name: vertex.test.test_conncache,vertex.test.test_q2q.TCPConnection.testSendingFiles -*-
 
 """
@@ -28,20 +29,30 @@ from twisted.internet import interfaces
 from twisted.internet.protocol import ClientFactory
 
 
+
 class ConnectionCache:
     def __init__(self):
         """
         """
-        # map (fromAddress, toAddress, protoName): protocol instance
+        # Map (fromAddress, toAddress, protoName): protocol instance
         self.cachedConnections = {}
-        # map (fromAddress, toAddress, protoName): list of Deferreds
+        # Map (fromAddress, toAddress, protoName): list of Deferreds
         self.inProgress = {}
         self._shuttingDown = None
+
 
     def connectCached(self, endpoint, protocolFactory,
                       extraWork=lambda x: x,
                       extraHash=None):
-        """See module docstring
+        """
+        See module docstring
+
+        @param endpoint:
+        @param protocolFactory:
+        @param extraWork:
+        @param extraHash:
+
+        @return: the D
         """
         key = endpoint, extraHash
         D = Deferred()
@@ -57,14 +68,17 @@ class ConnectionCache:
                     extraWork))
         return D
 
+
     def cacheUnrequested(self, endpoint, extraHash, protocol):
         self.connectionMadeForKey((endpoint, extraHash), protocol)
+
 
     def connectionMadeForKey(self, key, protocol):
         deferreds = self.inProgress.pop(key, [])
         self.cachedConnections[key] = protocol
         for d in deferreds:
             d.callback(protocol)
+
 
     def connectionLostForKey(self, key):
         """
@@ -85,6 +99,7 @@ class ConnectionCache:
         for d in deferreds:
             d.errback(reason)
 
+
     def shutdown(self):
         """
         Disconnect all cached connections.
@@ -98,6 +113,7 @@ class ConnectionCache:
             [maybeDeferred(p.transport.loseConnection)
              for p in self.cachedConnections.values()]
              + self._shuttingDown.values())
+
 
 
 class _CachingClientFactory(ClientFactory):
@@ -125,6 +141,7 @@ class _CachingClientFactory(ClientFactory):
 
     lostAsFailReason = CONNECTION_LOST
 
+
     def clientConnectionMade(self, protocol):
         def success(reason):
             self.cache.connectionMadeForKey(self.key, protocol)
@@ -138,6 +155,7 @@ class _CachingClientFactory(ClientFactory):
         maybeDeferred(self.extraWork, protocol).addCallbacks(
             success, failed)
 
+
     def clientConnectionLost(self, connector, reason):
         if self.finishedExtraWork:
             self.cache.connectionLostForKey(self.key)
@@ -146,12 +164,15 @@ class _CachingClientFactory(ClientFactory):
                                               self.lostAsFailReason)
         self.subFactory.clientConnectionLost(connector, reason)
 
+
     def clientConnectionFailed(self, connector, reason):
         self.cache.connectionFailedForKey(self.key, reason)
         self.subFactory.clientConnectionFailed(connector, reason)
 
+
     def buildProtocol(self, addr):
         return _CachingTransportShim(self, self.subFactory.buildProtocol(addr))
+
 
 
 class _CachingTransportShim:
@@ -177,4 +198,3 @@ class _CachingTransportShim:
     def __repr__(self):
         return 'Q2Q-Cached<%r, %r>' % (self.transport,
                                        self.protocol)
-

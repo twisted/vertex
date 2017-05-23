@@ -1,8 +1,8 @@
-# Copyright 2005 Divmod, Inc.  See LICENSE file for details
+# Copyright (c) Twisted Matrix Laboratories.
+# See LICENSE for details.
 
 from twisted.internet import defer
 from twisted.python.failure import Failure
-#from twisted.internet.task import Clock
 
 from twisted.test.iosim import connectedServerAndClient, FakeTransport
 
@@ -12,6 +12,7 @@ class FakeDelayedCall:
     def __init__(self, fqs, tup):
         self.fqs = fqs
         self.tup = tup
+
 
     def cancel(self):
         self.fqs.calls.remove(self.tup)
@@ -25,8 +26,10 @@ class FakeQ2QTransport(FakeTransport):
         self.q2qhost = q2qhost
         self.q2qpeer = q2qpeer
 
+
     def getQ2QPeer(self):
         return self.q2qpeer
+
 
     def getQ2QHost(self):
         return self.q2qhost
@@ -38,11 +41,12 @@ class FakeQ2QService:
     # run with it in order to verify that the test harness is not broken.
 
     def __init__(self):
-        self.listeners = {}     # map listening {(q2qid, protocol name):(protocol
+        self.listeners = {}     # Map listening {(q2qid, protocol name):(protocol
                                 # factory, protocol description)}
         self.pumps = []         # a list of IOPumps that we have to flush
         self.calls = []
         self.time = 0
+
 
     def callLater(self, s, f, *a, **k):
         # XXX TODO: return canceller
@@ -52,13 +56,14 @@ class FakeQ2QService:
         self.calls.sort()
         return FakeDelayedCall(self, tup)
 
+
     def flush(self, debug=False):
         result = True
         while result:
             self.time += 1
             result = False
             for x in range(2):
-                # run twice so that timed functions can interact with I/O
+                # Run twice so that timed functions can interact with I/O
                 for pump in self.pumps:
                     if pump.flush(debug):
                         result = True
@@ -69,13 +74,15 @@ class FakeQ2QService:
                 for s, f, a, k in c:
                     if debug:
                         print 'timed event', s, f, a, k
-                    f(*a,**k)
+                    f(*a, **k)
         return result
+
 
     def listenQ2Q(self, fromAddress, protocolsToFactories, serverDescription):
         for pname, pfact in protocolsToFactories.items():
             self.listeners[fromAddress, pname] = pfact, serverDescription
         return defer.succeed(None)
+
 
     def connectQ2Q(self, fromAddress, toAddress,
                    protocolName, protocolFactory,

@@ -1,4 +1,5 @@
-# Copyright 2005 Divmod, Inc.  See LICENSE file for details
+# Copyright (c) Twisted Matrix Laboratories.
+# See LICENSE for details.
 
 import array
 from vertex.bits import BitArray
@@ -16,13 +17,13 @@ bitResult = [
     6, 3, 4, 4, 5, 4, 5, 5, 6, 4, 5, 5, 6, 5, 6, 6, 7, 2, 3, 3, 4, 3, 4, 4, 5,
     3, 4, 4, 5, 4, 5, 5, 6, 3, 4, 4, 5, 4, 5, 5, 6, 4, 5, 5, 6, 5, 6, 6, 7, 3,
     4, 4, 5, 4, 5, 5, 6, 4, 5, 5, 6, 5, 6, 6, 7, 4, 5, 5, 6, 5, 6, 6, 7, 5, 6,
-    6, 7, 6, 7, 7, 8 ]
+    6, 7, 6, 7, 7, 8]
 
 
 
-class BitArrayTest(unittest.TestCase):
+class BitArrayTests(unittest.TestCase):
 
-    def testBasicBits(self):
+    def test_BasicBits(self):
         prev = BitArray(size=3)
         prev[0] = 1
         prev[1] = 1
@@ -38,7 +39,8 @@ class BitArrayTest(unittest.TestCase):
             assert cb == 2, cb
             prev = ba
 
-    def testPositions(self):
+
+    def test_Positions(self):
         SIZE = 25
         bitz = BitArray(size=SIZE)
         self.assertEquals(list(bitz.positions(0)), range(SIZE))
@@ -49,13 +51,15 @@ class BitArrayTest(unittest.TestCase):
         self.assertEquals(list(bitz.positions(0)), rs)
         self.assertEquals(list(bitz.positions(1)), [7])
 
-    def testDefaultBit(self):
+
+    def test_DefaultBit(self):
         a = BitArray(size=100, default=0)
         b = BitArray(size=100, default=1)
         self.assertEquals(list(a), [0] * 100)
         self.assertEquals(list(b), [1] * 100)
 
-    def testCalculateOnBits(self):
+
+    def test_CalculateOnBits(self):
         calc = []
         for x in range(256):
             c = 0
@@ -65,4 +69,3 @@ class BitArrayTest(unittest.TestCase):
                 c += n
             calc.append(c)
         self.assertEquals(calc, bitResult)
-

@@ -122,7 +122,7 @@ class Identify(Command):
         C: Domain: divmod.com
         C:
         S: -Answer: 1
-        S: Certificate: <<<base64-encoded self-signed certificate of divmod.com>>>
+        S: Certificate: <<<base64-encoded self-signed certificate>>>
         S:
 
     """
