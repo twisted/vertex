@@ -30,11 +30,11 @@ from twisted.application import service
 # Twisted.cred
 from twisted.cred.checkers import ICredentialsChecker
 from twisted.cred.portal import IRealm, Portal
-from twisted.cred.credentials import IUsernamePassword, UsernamePassword
+from twisted.cred.credentials import IUsernamePassword
 from twisted.cred.error import UnauthorizedLogin
 
 from twisted.protocols.amp import (
-    Argument, Boolean, String, Unicode, ListOf, AmpList, AmpBox, Command,
+    Argument, Boolean, String, Unicode, ListOf, AmpList, Command,
     StartTLS, ProtocolSwitchCommand, AMP
 )
 
