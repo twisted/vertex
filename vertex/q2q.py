@@ -2718,8 +2718,8 @@ class Q2QService(service.MultiService, protocol.ServerFactory):
                 )
             elif fromAddress.domain == '':
                 assert all( 
-                    fromAddress.resource == '',
-                    "No domain means anonymous, %r" % (fromAddress,)
+                    (fromAddress.resource == '',
+                    "No domain means anonymous, %r" % (fromAddress,))
                 )
                 
                 # We are actually anonymous, whoops!
