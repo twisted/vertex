@@ -8,8 +8,6 @@ from twisted.internet import defer
 from twisted.trial import unittest
 import txscrypt
 
-from zope.interface.declarations import directlyProvides
-
 
 
 def _makeStubTxscrypt(computeKeyReturns, checkPasswordReturns):
