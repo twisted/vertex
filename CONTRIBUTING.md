@@ -29,6 +29,11 @@ Review Process
 
 Vertex mostly follows the [Twisted review process](http://twistedmatrix.com/trac/wiki/ReviewProcess) for contributions, with some minor changes for working with Github.
 
+AI Policy
+---------
+
+Vertex follows the `Twisted AI Policy <https://docs.twisted.org/en/latest/development/ai-policy.html>`_. This means this project does not allow the inclusion of the outputs of generative AI tools.
+
 Issues
 ------
 Issues should generally be opened first, and pull requests linked to issues for the following reasons:
